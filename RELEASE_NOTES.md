@@ -1,4 +1,4 @@
-# Legacy Audio Provisioner v1.0.0 — Production-Ready
+# Legacy Audio Provisioner v1.1.0 — Production-Ready
 
 **Release Date:** March 16, 2026
 
@@ -6,7 +6,7 @@
 
 Legacy Audio Provisioner is now ready for production use as a robust, spec-driven solution for provisioning USB drives compatible with legacy audio systems (32-bit firmware, FAT32, strict naming conventions). This release marks the completion of Phase 2 disaster recovery and includes critical security and reliability hardening.
 
-## What's New in 1.0.0
+## What's New in 1.1.0
 
 ### Core Features
 - ✅ **Native I/O Pipeline**: Zero shell-outs. All operations use `std::fs`, `statvfs`, and POSIX syscalls for maximum control and safety.
@@ -22,7 +22,7 @@ Legacy Audio Provisioner is now ready for production use as a robust, spec-drive
 - **Non-UTF8 Robustness**: Handles filenames with illegal byte sequences gracefully (lossy conversion instead of panic).
 
 ## Testing & Quality
-- **44/44 tests passing** (37 unit + 5 integration + 2 doc tests)
+- **54/54 tests passing** (41 unit + 11 integration + 2 doc tests)
 - **Strict linting clean**: `cargo clippy --all-targets -- -D warnings`
 - **Full end-to-end coverage**: Real library (no mocks), isolated TempDir tests, criptographic integrity checks
 
@@ -71,7 +71,7 @@ cargo build --release
 - [ ] Pre-built binaries for Linux distributions
 
 ### Design Decisions
-- **No external tools**: All I/O is native Rust (portable, deterministic).
+- **Controlled external tools where required**: Rust native I/O for FS operations, plus explicit `ffprobe/ffmpeg` for media normalization and Linux safe-eject commands (`sync`, `umount`, `udisksctl`).
 - **Fail-safe defaults**: Missing hashes = reprocess. Invalid topology = abort. Large devices (>64GB) = require confirmation.
 - **Atomic by contract**: Every state change is persisted. Recovery without duplication guaranteed.
 
@@ -102,6 +102,6 @@ For issues, questions, or feedback:
 
 ---
 
-**Legacy Audio Provisioner** 1.0.0 is production-ready for provisioning legacy audio systems. Built with Rust for safety, atomicity, and reliability under hostile hardware conditions (power loss, FAT32 corruption, firmware crashes).
+**Legacy Audio Provisioner** 1.1.0 is production-ready for provisioning legacy audio systems. Built with Rust for safety, atomicity, and reliability under hostile hardware conditions (power loss, FAT32 corruption, firmware crashes).
 
 **Methodology**: Spec-Driven Development | **Language**: Rust 2021 Edition | **Status**: Phase 2 Complete

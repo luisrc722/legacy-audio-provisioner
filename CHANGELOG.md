@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.0] - 2026-03-16
+## [1.1.0] - 2026-03-16
 
 ### Fixed
 - Enforced strict `--dry-run` semantics with zero writes to USB and local disk.
@@ -22,7 +22,7 @@ All notable changes to this project are documented in this file.
 - Repository now passes strict linting and tests after hardening:
   - `cargo clippy --all-targets -- -D warnings`
   - `cargo test`
-- Current test status: `44/44` passing.
+- Current test status: `54/54` passing (41 unit + 11 integration + 2 doc).
 
 ### Notes
-- This release aligns runtime behavior with documented DbC constraints and ADR-0001 atomic checkpoint guarantees.
+- This release aligns runtime behavior with documented DbC constraints, ADR-0005 sync/hash policy, and legacy architecture notes for atomic checkpointing.

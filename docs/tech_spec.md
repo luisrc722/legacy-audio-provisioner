@@ -119,4 +119,4 @@ Definido en `Cargo.toml`:
 - `strip = true`
 
 ## Document Governance
-Este archivo se considera fuente de verdad de alto nivel. Cambios arquitectonicos deben enlazar al ADR correspondiente en `docs/architecture/`.
+Este archivo se considera fuente de verdad de alto nivel. Cambios arquitectonicos deben enlazar al ADR correspondiente en `docs/adr/` (canonico).
