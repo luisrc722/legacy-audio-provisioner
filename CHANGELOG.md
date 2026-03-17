@@ -18,6 +18,19 @@ All notable changes to this project are documented in this file.
 - Verification policy now fails closed on cryptographic anomalies instead of continuing permissively.
 - Module header documentation style cleaned to satisfy strict lint pipelines (`clippy -D warnings`).
 
+### Documentation
+- Established canonical Docs-as-Code governance via ADR-0006 (`docs/adr/0006-docs-as-code-governance.md`).
+- Updated core documentation with visual Mermaid flows:
+  - Release gates in `CHECKLIST.md`
+  - Provision/recovery pipeline in `docs/tech_spec.md`
+  - Integration traceability in `docs/testing/integration_tests.md`
+- Clarified source-of-truth boundaries:
+  - Canonical ADRs in `docs/adr/`
+  - Legacy context in `docs/architecture/` and `docs/archive/`
+- Hardened release process with two physical-risk gates:
+  - eject handshake verification before physical removal
+  - quarantine quota check (`.legacy_quarantine` <= 10% USB capacity)
+
 ### Quality
 - Repository now passes strict linting and tests after hardening:
   - `cargo clippy --all-targets -- -D warnings`
