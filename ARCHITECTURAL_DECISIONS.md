@@ -3,6 +3,8 @@
 Documento de decisiones técnicas de alto nivel para la Fase 2 del motor.
 Complementa los ADRs canonicos en `docs/adr/` con foco operativo en Sync, integridad y tolerancia a fallos. Las notas en `docs/architecture/` se mantienen como contexto legacy.
 
+Gobernanza documental activa: ver `docs/adr/0006-docs-as-code-governance.md`.
+
 ## AD-01: USB como Fuente de Verdad en modo `--sync`
 
 - Decisión: usar diff SHA256 entre `audio-source` y USB para procesar solo novedades.

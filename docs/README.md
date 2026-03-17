@@ -2,6 +2,41 @@
 
 Este indice se mantiene por inventario de carpetas y nombres de archivo (no por menciones internas).
 
+## Modelo Operativo (Docs-as-Code)
+
+Fuente de verdad por tipo de documento:
+
+- Decisiones arquitectonicas activas: `docs/adr/` (canonico).
+- Especificacion tecnica de implementacion: `docs/tech_spec.md`.
+- Evidencia de validacion: `docs/testing/`.
+- Contexto historico/no normativo: `docs/architecture/` y `docs/archive/`.
+
+### Mapa Visual
+
+```mermaid
+flowchart TD
+	Code[src/*.rs + tests/*.rs]
+	ADR[docs/adr/*]
+	Spec[docs/tech_spec.md]
+	Tests[docs/testing/*]
+	Legacy[docs/architecture/* + docs/archive/*]
+
+	ADR --> Spec
+	Spec --> Code
+	Code --> Tests
+	Tests --> Spec
+	Legacy --> Spec
+```
+
+## Documentacion por Audiencia
+
+| Audiencia | Documentos principales | Frecuencia esperada |
+| --- | --- | --- |
+| Operacion/Release | `README.md`, `CHECKLIST.md`, `CHANGELOG.md`, `RELEASE_NOTES.md` | Cada release |
+| Desarrollo | `docs/tech_spec.md`, `docs/contracts/design_by_contract.md`, `docs/testing/*` | Cada cambio funcional |
+| Arquitectura | `docs/adr/*` | Cada decision nueva/supercedida |
+| Historico | `docs/architecture/*`, `docs/archive/*` | Solo cuando se archiva contexto |
+
 ## Estructura Canonica (`docs/`)
 
 `docs/`
@@ -26,6 +61,7 @@ Notas legacy/no normativas de arquitectura (sin IDs ADR globales):
 - `docs/adr/0003-ffmpeg-normalization.md`
 - `docs/adr/0004-quarantine-isolation.md`
 - `docs/adr/0005-sync-sha256.md`
+- `docs/adr/0006-docs-as-code-governance.md`
 
 `docs/testing/`
 - `docs/testing/integration_tests.md`
@@ -61,3 +97,10 @@ Documentos activos en raiz:
 No se mantienen stubs de compatibilidad en raiz.
 
 Si se agrega o mueve un `.md`, este archivo debe actualizarse en el mismo cambio.
+
+## Workflow Obligatorio
+
+1. Cambiar codigo/tests.
+2. Actualizar ADR/Spec/Testing docs afectadas en el mismo commit.
+3. Ejecutar `cargo test`.
+4. Validar que `docs/README.md` refleja el arbol real.

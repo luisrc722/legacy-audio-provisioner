@@ -44,6 +44,18 @@ Validar el comportamiento integrado del motor sobre los flujos críticos de Fase
 | `hardware.rs` | mapeo de fs read-only a error tipado |
 | `verification.rs` | fraude de hardware por mismatches SHA256 consecutivos |
 
+## Trazabilidad Visual
+
+```mermaid
+flowchart LR
+	T05[test_05_sync_diff_ignores_existing_hashes] --> D[diffing.rs]
+	T06[test_06_orphan_isolation_to_quarantine] --> Q[quarantine_untracked_files]
+	T07[test_07_ipc_event_serialization_contract] --> I[ipc.rs]
+	T08[test_08_m4p_is_reported_as_drm_protected] --> N[normalizer.rs]
+	T09[test_09_read_only_filesystem_maps_to_typed_error] --> H[hardware.rs]
+	T10[test_10_hardware_fraud_detected_after_five_hash_mismatches] --> V[verification.rs]
+```
+
 ## Coverage Baseline
 
 ```text

@@ -77,6 +77,37 @@ Los firmwares legacy fallan ante:
 - Eventos JSON en `ipc::IpcEvent`: `PROGRESS`, `WARNING`, `FATAL_ERROR`, `SUCCESS`.
 
 ## Current Architecture (Implementation)
+
+### Provision Pipeline (Visual)
+
+```mermaid
+flowchart TD
+	A[validate_device_path + RW check + lock] --> B[discover_audio_files]
+	B --> C{--sync}
+	C -- yes --> D[calculate_sync_diff]
+	C -- no --> E[full source set]
+	D --> F[backup + quarantine_untracked]
+	E --> F
+	F --> G[sanitize + plan_distribution]
+	G --> H[normalize_audio + checkpoint per file]
+	H --> I[pre_eject_verification]
+	I --> J[checkpoint finalize + mirror to USB]
+	J --> K[safe_eject]
+```
+
+### Failure/Recovery Loop (Visual)
+
+```mermaid
+stateDiagram-v2
+	[*] --> InProgress
+	InProgress --> Completed: file normalized + hash validated
+	InProgress --> Failed: io/codec/fs error
+	Failed --> Resume: --resume
+	Resume --> InProgress: recovery::execute_recovery
+	Completed --> Finalized: checkpoint.finalize
+	Finalized --> [*]
+```
+
 Pipeline de provision:
 1. `hardware::validate_device_path`
 2. `audio_discovery::discover_audio_files`
@@ -120,3 +151,9 @@ Definido en `Cargo.toml`:
 
 ## Document Governance
 Este archivo se considera fuente de verdad de alto nivel. Cambios arquitectonicos deben enlazar al ADR correspondiente en `docs/adr/` (canonico).
+
+Checklist minimo de sincronizacion documental por cambio funcional:
+
+- ADR nuevo o supercedido (si cambia decision).
+- Actualizacion de este Tech Spec (si cambia flujo/reglas).
+- Actualizacion de `docs/testing/*` (si cambia cobertura o pruebas).

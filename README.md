@@ -153,6 +153,7 @@ Cobertura relevante de Fase 2:
 - [ADR History (Immutable, Canonical)](docs/adr/)
 - [Legacy Architecture Notes (Context)](docs/architecture/)
 - [Architectural Decisions](ARCHITECTURAL_DECISIONS.md)
+- [ADR-0006 Docs Governance](docs/adr/0006-docs-as-code-governance.md)
 - [Release Checklist](CHECKLIST.md)
 
 ## Build

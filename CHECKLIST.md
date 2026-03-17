@@ -2,6 +2,20 @@
 
 Use this checklist before handing off media/software deliverables.
 
+## Release Gate Flow (Visual)
+
+```mermaid
+flowchart TD
+	A[cargo test] --> B{54/54 pass?}
+	B -- no --> Z[Stop release]
+	B -- yes --> C[Version + changelog + ADR/docs sync]
+	C --> D[build --release]
+	D --> E[integration test]
+	E --> F{real FAT32 validation done?}
+	F -- no --> Z
+	F -- yes --> G[Release approved]
+```
+
 ## Pre-Release Gates
 
 1. [ ] All tests pass (`cargo test`) and baseline remains 54/54.
