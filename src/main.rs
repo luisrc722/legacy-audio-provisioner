@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use clap::Parser;
 use chrono::Local;
+use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 use sha2::{Digest, Sha256};
@@ -12,12 +12,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 // Consumimos nuestra propia libreria (definida en src/lib.rs)
+use legacy_audio_provisioner::error::ProvisioningError;
+use legacy_audio_provisioner::ipc::IpcEvent;
 use legacy_audio_provisioner::{
     audio_discovery, backup, checkpoint, diffing, distribution, hardware, normalizer, recovery,
     sanitizer, verification,
 };
-use legacy_audio_provisioner::error::ProvisioningError;
-use legacy_audio_provisioner::ipc::IpcEvent;
 
 fn append_drm_skip_log(backup_dir: &std::path::Path, original_path: &std::path::Path) {
     let log_path = backup_dir.join("unsupported_drm_files.log");
@@ -45,39 +45,58 @@ fn human_out(json_mode: bool, message: &str) {
     long_about = "Transforms and normalizes audio files for compatibility with \
                    legacy audio systems (32-bit firmware, FAT32, strict naming conventions)"
 )]
-struct Args {
-    #[arg(short, long, value_name = "PATH")]
-    usb_mount: Option<PathBuf>,
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 
-    #[arg(short, long, value_name = "PATH")]
-    audio_source: Option<PathBuf>,
-
-    #[arg(short = 'd', long)]
-    list_devices: bool,
-
-    #[arg(long)]
-    scan_usb_audio: bool,
-
-    #[arg(long, value_name = "BACKUP_DIR")]
-    resume: Option<PathBuf>,
-
-    #[arg(long)]
-    dry_run: bool,
-
-    #[arg(long, help = "Modo incremental: solo procesa archivos nuevos por hash")]
-    sync: bool,
-
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 
-    #[arg(long, help = "Emite eventos IPC en formato JSON Lines por stdout")]
+    #[arg(
+        long,
+        help = "Emite eventos IPC en formato JSON Lines por stdout",
+        global = true
+    )]
     json: bool,
 }
 
-fn main() -> std::result::Result<(), ProvisioningError> {
-    let args = Args::parse();
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Lista los dispositivos USB/extraibles detectados
+    List,
 
-    let log_level = match args.verbose {
+    /// Escanea la primera USB detectada en busca de archivos de audio
+    Scan,
+
+    /// Procesa, normaliza y sincroniza audio hacia la USB
+    Provision {
+        #[arg(short, long, value_name = "PATH")]
+        usb_mount: PathBuf,
+
+        #[arg(short, long, value_name = "PATH")]
+        audio_source: PathBuf,
+
+        #[arg(long)]
+        dry_run: bool,
+
+        #[arg(long, help = "Modo incremental: solo procesa archivos nuevos por hash")]
+        sync: bool,
+    },
+
+    /// Reanuda una sesion interrumpida desde un backup
+    Resume {
+        #[arg(short, long, value_name = "PATH")]
+        usb_mount: PathBuf,
+
+        #[arg(long, value_name = "BACKUP_DIR")]
+        resume: PathBuf,
+    },
+}
+
+fn main() -> std::result::Result<(), ProvisioningError> {
+    let cli = Cli::parse();
+
+    let log_level = match cli.verbose {
         0 => "warn",
         1 => "info",
         2 => "debug",
@@ -92,37 +111,36 @@ fn main() -> std::result::Result<(), ProvisioningError> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let execution_result: std::result::Result<(), ProvisioningError> = if args.list_devices {
-        if args.json {
-            Err(ProvisioningError::UnsupportedJsonMode {
-                feature: "--list-devices".to_string(),
-            })
-        } else {
-            list_usb_devices().map_err(ProvisioningError::from_anyhow)
+    let execution_result: std::result::Result<(), ProvisioningError> = match cli.command {
+        Commands::List => {
+            if cli.json {
+                Err(ProvisioningError::UnsupportedJsonMode {
+                    feature: "list".to_string(),
+                })
+            } else {
+                list_usb_devices().map_err(ProvisioningError::from_anyhow)
+            }
         }
-    } else if args.scan_usb_audio {
-        if args.json {
-            Err(ProvisioningError::UnsupportedJsonMode {
-                feature: "--scan-usb-audio".to_string(),
-            })
-        } else {
-            scan_usb_audio_automatically().map_err(ProvisioningError::from_anyhow)
+        Commands::Scan => {
+            if cli.json {
+                Err(ProvisioningError::UnsupportedJsonMode {
+                    feature: "scan".to_string(),
+                })
+            } else {
+                scan_usb_audio_automatically().map_err(ProvisioningError::from_anyhow)
+            }
         }
-    } else if let Some(backup_dir) = args.resume {
-        let usb = args
-            .usb_mount
-            .ok_or(ProvisioningError::MissingUsbMountForResume)?;
-        resume_provisioning(&backup_dir, &usb, args.json).map_err(ProvisioningError::from_anyhow)
-    } else if let (Some(usb), Some(audio_source)) = (args.usb_mount, args.audio_source) {
-        provision_usb(&usb, &audio_source, args.dry_run, args.sync, args.json)
-            .map_err(ProvisioningError::from_anyhow)
-    } else {
-        eprintln!("Error: Argumentos insuficientes.");
-        eprintln!("  --list-devices");
-        eprintln!("  --scan-usb-audio");
-        eprintln!("  --usb-mount <PATH> --audio-source <PATH>");
-        eprintln!("  --usb-mount <PATH> --resume <BACKUP_DIR>");
-        std::process::exit(1);
+        Commands::Resume { usb_mount, resume } => {
+            resume_provisioning(&resume, &usb_mount, cli.json)
+                .map_err(ProvisioningError::from_anyhow)
+        }
+        Commands::Provision {
+            usb_mount,
+            audio_source,
+            dry_run,
+            sync,
+        } => provision_usb(&usb_mount, &audio_source, dry_run, sync, cli.json)
+            .map_err(ProvisioningError::from_anyhow),
     };
 
     if let Err(e) = execution_result {
@@ -131,7 +149,7 @@ fn main() -> std::result::Result<(), ProvisioningError> {
             message: e.to_string(),
             action_required: e.action_required().to_string(),
         }
-        .emit(args.json);
+        .emit(cli.json);
         return Err(e);
     }
 
@@ -247,7 +265,9 @@ fn provision_usb(
 
         let usb_checkpoint_path = usb_mount.join(".provisioning_checkpoint");
         if usb_checkpoint_path.exists() {
-            if let Ok(usb_checkpoint_mgr) = checkpoint::CheckpointManager::load_from_disk(&usb_checkpoint_path) {
+            if let Ok(usb_checkpoint_mgr) =
+                checkpoint::CheckpointManager::load_from_disk(&usb_checkpoint_path)
+            {
                 for file_cp in usb_checkpoint_mgr.get_data().processed_files.values() {
                     checkpoint_known_names.insert(file_cp.normalized_name.clone());
                     if let Some((prefix, _)) = file_cp.normalized_name.split_once('_') {

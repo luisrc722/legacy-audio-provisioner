@@ -92,33 +92,42 @@ Eventos IPC JSON (`src/ipc.rs`) disponibles para UI:
 
 ```bash
 # Descubrir dispositivos válidos
-legacy-audio-provisioner --list-devices
+legacy-audio-provisioner list
+
+# Escanear audio en la primera USB detectada
+legacy-audio-provisioner scan
 
 # Simulación sin mutación
 legacy-audio-provisioner \
+  provision \
   --usb-mount /media/user/USB_TARGET \
   --audio-source ~/Music \
   --dry-run
 
 # Provisión completa
 legacy-audio-provisioner \
+  provision \
   --usb-mount /media/user/USB_TARGET \
   --audio-source ~/Music
 
 # Sincronización incremental
 legacy-audio-provisioner \
+  provision \
   --usb-mount /media/user/USB_TARGET \
   --audio-source ~/Music \
   --sync
 
 # Eventos IPC JSON
 legacy-audio-provisioner \
+  --json \
+  provision \
   --usb-mount /media/user/USB_TARGET \
   --audio-source ~/Music \
-  --sync --json
+  --sync
 
 # Reanudación tras fallo
 legacy-audio-provisioner \
+  resume \
   --usb-mount /media/user/USB_TARGET \
   --resume ~/usb_backup_20260315_1430
 ```

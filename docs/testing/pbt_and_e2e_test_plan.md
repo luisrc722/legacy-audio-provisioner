@@ -32,14 +32,14 @@ Se utiliza el crate `proptest` para validar matemáticamente la capa de transfor
    - **Propiedad 2:** La suma de archivos en todos los volúmenes es exactamente igual al total de archivos inyectados en el input (`sum(files) == input.len()`). Ningún archivo se pierde o se duplica en memoria.
 
 ## E2E Critical Scenario: Disaster Recovery
-**Escenario:** Provisión interrumpida a nivel de kernel (`SIGKILL`) durante transcodificación FFmpeg, seguida de recuperación automática (`--resume`).
+**Escenario:** Provisión interrumpida a nivel de kernel (`SIGKILL`) durante transcodificación FFmpeg, seguida de recuperación automática (`resume`).
 
 **Secuencia de Validación Automática:**
 1. Generar fixtures reales (`mp3` passthrough + `flac` para forzar transcodificación).
 2. Iniciar provisión en background.
 3. Sondear disco y enviar `SIGKILL (-9)` en el milisegundo en que el primer archivo toque la USB.
 4. Auditar bitácora transaccional (estado debe ser `Completed` para el archivo 1, e `InProgress` para el archivo 2).
-5. Ejecutar comando de reanudación `--resume`.
+5. Ejecutar comando de reanudación `resume`.
 6. **Aserciones Finales:**
    - Cero inodos huérfanos de 0 bytes en la tabla FAT.
    - El archivo pendiente fue recodificado exitosamente por el normalizador.
@@ -83,7 +83,7 @@ ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -c:a libmp3lame /tmp/legacy_s
 ffmpeg -f lavfi -i "sine=frequency=880:duration=5" -c:a flac /tmp/legacy_source/02.flac
 
 # 3. Lanzar provisión y mutilar proceso atómicamente
-./target/debug/legacy-audio-provisioner --usb-mount /tmp/legacy_usb --audio-source /tmp/legacy_source -vv &
+./target/debug/legacy-audio-provisioner provision --usb-mount /tmp/legacy_usb --audio-source /tmp/legacy_source -vv &
 PROV_PID=$!
 
 # Sondear el disco para matar el proceso apenas escriba el primer archivo
@@ -97,7 +97,7 @@ done
 
 # 4. Localizar la bitácora atómica y ejecutar reanudación
 BACKUP_DIR=$(ls -td ~/usb_backup_* | head -1)
-./target/debug/legacy-audio-provisioner --usb-mount /tmp/legacy_usb --resume "$BACKUP_DIR" -vv
+./target/debug/legacy-audio-provisioner resume --usb-mount /tmp/legacy_usb --resume "$BACKUP_DIR" -vv
 
 # 5. Verificación Criptográfica Final
 sha256sum /tmp/legacy_usb/VOL_01/*.mp3

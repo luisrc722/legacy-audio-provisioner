@@ -27,6 +27,7 @@ cargo build --release
 
 # Ejecutar en modo simulación
 ./target/release/legacy-audio-provisioner \
+  provision \
   --usb-mount /media/usuario/DISCO_USB \
   --audio-source ~/MiMusica \
   --dry-run \
@@ -63,6 +64,7 @@ Una vez que el dry-run se vea bien:
 
 ```bash
 ./target/release/legacy-audio-provisioner \
+  provision \
   --usb-mount /media/usuario/DISCO_USB \
   --audio-source ~/MiMusica \
   --verbose
@@ -74,6 +76,7 @@ Una vez que el dry-run se vea bien:
 
 ```bash
 ./target/release/legacy-audio-provisioner \
+  provision \
   --usb-mount /media/usuario/DISCO_GRANDE \
   --audio-source ~/MiMusica \
   --verbose
@@ -85,6 +88,7 @@ Una vez que el dry-run se vea bien:
 
 ```bash
 RUST_LOG=trace ./target/release/legacy-audio-provisioner \
+  provision \
   --usb-mount /media/usuario/DISCO_USB \
   --audio-source ~/MiMusica \
   -vvv
@@ -93,7 +97,7 @@ RUST_LOG=trace ./target/release/legacy-audio-provisioner \
 ### Caso 3: Listar dispositivos detectados
 
 ```bash
-./target/release/legacy-audio-provisioner --list-devices
+./target/release/legacy-audio-provisioner list
 ```
 
 ### Caso 4: Reanudar una provisión interrumpida
@@ -102,6 +106,7 @@ Si el proceso fue interrumpido (corte de luz, desconexión USB), el checkpoint a
 
 ```bash
 ./target/release/legacy-audio-provisioner \
+  resume \
   --usb-mount /media/usuario/DISCO_USB \
   --resume ~/usb_backup_20260315_1430
 ```

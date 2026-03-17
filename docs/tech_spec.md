@@ -127,13 +127,13 @@ Pipeline de recovery:
 4. terminar cuando hashes y estado convergen
 
 ## Operational CLI
-- `--list-devices`
-- `--scan-usb-audio`
-- `--usb-mount <PATH> --audio-source <PATH>`
-- `--usb-mount <PATH> --audio-source <PATH> --sync`
-- `--usb-mount <PATH> --resume <BACKUP_DIR>`
-- `--dry-run`
-- `--json`
+- `list`
+- `scan`
+- `provision --usb-mount <PATH> --audio-source <PATH>`
+- `provision --usb-mount <PATH> --audio-source <PATH> --sync`
+- `resume --usb-mount <PATH> --resume <BACKUP_DIR>`
+- `provision ... --dry-run`
+- `--json` (global)
 
 ## Non-Functional Requirements
 - Seguridad: denegar targets no removibles/no FAT32.
