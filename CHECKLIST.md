@@ -13,7 +13,11 @@ flowchart TD
 	D --> E[integration test]
 	E --> F{real FAT32 validation done?}
 	F -- no --> Z
-	F -- yes --> G[Release approved]
+	F -- yes --> H{eject handshake verified?}
+	H -- no --> Z
+	H -- yes --> I{quarantine <= 10% USB capacity?}
+	I -- no --> Z
+	I -- yes --> G[Release approved]
 ```
 
 ## Pre-Release Gates
@@ -25,6 +29,8 @@ flowchart TD
 5. [ ] `CHANGELOG.md` includes release notes for the shipped scope.
 6. [ ] Checkpoint and recovery paths were validated on a real FAT32 removable USB.
 7. [ ] No destructive behavior for untracked files (backup-first quarantine verified).
+8. [ ] Physical ejection verified: `udisksctl power-off` or `eject` signal received before physical removal.
+9. [ ] Quarantine quota verified: `.legacy_quarantine` does not exceed 10% of total USB capacity.
 
 ## Artifacts
 
