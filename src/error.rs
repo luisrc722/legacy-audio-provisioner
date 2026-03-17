@@ -26,6 +26,9 @@ pub enum ProvisioningError {
 
     #[error("PROVISIONING_FAILED: {details}")]
     ProvisioningFailed { details: String },
+
+    #[error("INVALID_CONFIG: {details}")]
+    InvalidConfig { details: String },
 }
 
 impl ProvisioningError {
@@ -39,6 +42,7 @@ impl ProvisioningError {
             ProvisioningError::HardwareFraudDetected { .. } => "HARDWARE_FRAUD_DETECTED",
             ProvisioningError::DrmProtected { .. } => "DRM_PROTECTED",
             ProvisioningError::ProvisioningFailed { .. } => "PROVISIONING_FAILED",
+            ProvisioningError::InvalidConfig { .. } => "INVALID_CONFIG",
         }
     }
 
@@ -67,6 +71,9 @@ impl ProvisioningError {
             }
             ProvisioningError::ProvisioningFailed { .. } => {
                 "Revise el mensaje de error y reintente con --resume."
+            }
+            ProvisioningError::InvalidConfig { .. } => {
+                "Corrija los paths de entrada: el origen y el destino no pueden ser iguales ni estar anidados."
             }
         }
     }

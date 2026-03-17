@@ -139,8 +139,11 @@ fn main() -> std::result::Result<(), ProvisioningError> {
             audio_source,
             dry_run,
             sync,
-        } => provision_usb(&usb_mount, &audio_source, dry_run, sync, cli.json)
-            .map_err(ProvisioningError::from_anyhow),
+        } => {
+            validate_canonical_paths(&usb_mount, &audio_source)?;
+            provision_usb(&usb_mount, &audio_source, dry_run, sync, cli.json)
+                .map_err(ProvisioningError::from_anyhow)
+        }
     };
 
     if let Err(e) = execution_result {
@@ -203,6 +206,48 @@ fn scan_usb_audio_automatically() -> Result<()> {
 
     println!("✅ Found {} audio file(s)", report.audio_files.len());
     println!("  Total size: {:.2} MB", report.total_size_mb());
+    Ok(())
+}
+
+fn validate_canonical_paths(
+    usb_mount: &std::path::Path,
+    audio_source: &std::path::Path,
+) -> std::result::Result<(), ProvisioningError> {
+    let usb_can = usb_mount
+        .canonicalize()
+        .map_err(|e| ProvisioningError::InvalidConfig {
+            details: format!("No se pudo resolver la ruta USB '{}': {}", usb_mount.display(), e),
+        })?;
+
+    let src_can = audio_source
+        .canonicalize()
+        .map_err(|e| ProvisioningError::InvalidConfig {
+            details: format!(
+                "No se pudo resolver la ruta de origen '{}': {}",
+                audio_source.display(),
+                e
+            ),
+        })?;
+
+    if usb_can == src_can {
+        return Err(ProvisioningError::InvalidConfig {
+            details: format!(
+                "El origen y el destino son la misma ubicacion fisica: '{}'",
+                usb_can.display()
+            ),
+        });
+    }
+
+    if src_can.starts_with(&usb_can) {
+        return Err(ProvisioningError::InvalidConfig {
+            details: format!(
+                "El origen de audio '{}' no puede estar dentro de la USB de destino '{}'.",
+                src_can.display(),
+                usb_can.display()
+            ),
+        });
+    }
+
     Ok(())
 }
 
