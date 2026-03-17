@@ -55,6 +55,12 @@ Los firmwares legacy fallan ante:
 - Flujo backup-first: primero copia a host, luego movimiento en USB.
 - Politica por defecto no destructiva (sin purga automatica).
 
+### R-30 Validacion de paths canonicos
+- `--usb-mount` y `--audio-source` no pueden ser el mismo path fisico.
+- El origen de audio no puede estar anidado dentro del mount de destino USB.
+- Resolucion mediante `std::fs::canonicalize()` antes de iniciar el pipeline (pre-flight).
+- Fallo anticipado con `ProvisioningError::InvalidConfig` y codigo IPC `INVALID_CONFIG`.
+
 ### R-15 Feedback visual
 - Barra de progreso con ETA durante el paso de normalizacion/copia.
 

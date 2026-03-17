@@ -62,6 +62,7 @@ Se utiliza el crate `proptest` para validar matemáticamente la capa de transfor
 | R-22 NAND spoofing guard | `tests/integration_test.rs::test_10_hardware_fraud_detected_after_five_hash_mismatches` | Covered |
 | R-23 Incremental sync diff | `tests/integration_test.rs::test_05_sync_diff_ignores_existing_hashes` | Covered |
 | R-25/R-26 Untracked quarantine | `tests/integration_test.rs::test_06_orphan_isolation_to_quarantine` | Covered |
+| R-30 Canonical path guard | `src/main.rs::validate_canonical_paths` (equality + nesting, `canonicalize`) | Covered |
 | IPC contract JSON | `tests/integration_test.rs::test_07_ipc_event_serialization_contract` | Covered |
 | R-T5 Final verification | `src/verification.rs` strict QA + safe eject syscalls | Covered |
 
