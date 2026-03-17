@@ -15,8 +15,8 @@ use std::time::Instant;
 use legacy_audio_provisioner::error::ProvisioningError;
 use legacy_audio_provisioner::ipc::IpcEvent;
 use legacy_audio_provisioner::{
-    audio_discovery, backup, checkpoint, diffing, distribution, hardware, normalizer, recovery,
-    sanitizer, verification,
+    audio_discovery, backup, checkpoint, diffing, distribution, hardware, ingestion, normalizer,
+    recovery, sanitizer, verification,
 };
 
 fn append_drm_skip_log(backup_dir: &std::path::Path, original_path: &std::path::Path) {
@@ -65,16 +65,19 @@ enum Commands {
     /// Lista los dispositivos USB/extraibles detectados
     List,
 
-    /// Escanea la primera USB detectada en busca de archivos de audio
-    Scan,
+    /// Escanea audio en una USB especifica o en la primera detectada
+    Scan {
+        #[arg(long, value_name = "PATH")]
+        usb: Option<PathBuf>,
+    },
 
     /// Procesa, normaliza y sincroniza audio hacia la USB
     Provision {
-        #[arg(short, long, value_name = "PATH")]
-        usb_mount: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        usb: PathBuf,
 
-        #[arg(short, long, value_name = "PATH")]
-        audio_source: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        source: PathBuf,
 
         #[arg(long)]
         dry_run: bool,
@@ -85,11 +88,32 @@ enum Commands {
 
     /// Reanuda una sesion interrumpida desde un backup
     Resume {
-        #[arg(short, long, value_name = "PATH")]
-        usb_mount: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        usb: PathBuf,
 
         #[arg(long, value_name = "BACKUP_DIR")]
         resume: PathBuf,
+    },
+
+    /// Copia solo audio desde origen hacia staging local del host (R-31)
+    Ingest {
+        #[arg(long, value_name = "PATH")]
+        usb: PathBuf,
+
+        #[arg(long, value_name = "PATH")]
+        source: PathBuf,
+    },
+
+    /// Orquesta ingesta + provision --sync para refactorizacion in-situ (R-31)
+    Refactor {
+        #[arg(long, value_name = "PATH")]
+        usb: PathBuf,
+
+        #[arg(long, value_name = "PATH")]
+        source: PathBuf,
+
+        #[arg(long, help = "Conservar el staging local al finalizar")]
+        keep_staging: bool,
     },
 }
 
@@ -121,27 +145,38 @@ fn main() -> std::result::Result<(), ProvisioningError> {
                 list_usb_devices().map_err(ProvisioningError::from_anyhow)
             }
         }
-        Commands::Scan => {
+        Commands::Scan { usb } => {
             if cli.json {
                 Err(ProvisioningError::UnsupportedJsonMode {
                     feature: "scan".to_string(),
                 })
             } else {
-                scan_usb_audio_automatically().map_err(ProvisioningError::from_anyhow)
+                scan_usb_audio(usb.as_deref()).map_err(ProvisioningError::from_anyhow)
             }
         }
-        Commands::Resume { usb_mount, resume } => {
-            resume_provisioning(&resume, &usb_mount, cli.json)
+        Commands::Resume { usb, resume } => {
+            resume_provisioning(&resume, &usb, cli.json)
                 .map_err(ProvisioningError::from_anyhow)
         }
         Commands::Provision {
-            usb_mount,
-            audio_source,
+            usb,
+            source,
             dry_run,
             sync,
         } => {
-            validate_canonical_paths(&usb_mount, &audio_source)?;
-            provision_usb(&usb_mount, &audio_source, dry_run, sync, cli.json)
+            validate_canonical_paths(&usb, &source)?;
+            provision_usb(&usb, &source, dry_run, sync, cli.json)
+                .map_err(ProvisioningError::from_anyhow)
+        }
+        Commands::Ingest { usb, source } => {
+            ingest_staging(&usb, &source, cli.json).map_err(ProvisioningError::from_anyhow)
+        }
+        Commands::Refactor {
+            usb,
+            source,
+            keep_staging,
+        } => {
+            refactor_usb(&usb, &source, keep_staging, cli.json)
                 .map_err(ProvisioningError::from_anyhow)
         }
     };
@@ -185,19 +220,21 @@ fn list_usb_devices() -> Result<()> {
     Ok(())
 }
 
-fn scan_usb_audio_automatically() -> Result<()> {
-    let devices = hardware::detect_usb_devices()?;
-    if devices.is_empty() {
-        eprintln!("\n❌ ERROR: No USB devices detected.");
-        return Ok(());
-    }
-    let device = &devices[0];
-    println!(
-        "\n🔍 Scanning for audio files on {}...",
-        device.mount_point.display()
-    );
+fn scan_usb_audio(usb: Option<&Path>) -> Result<()> {
+    let mountpoint = if let Some(path) = usb {
+        path.to_path_buf()
+    } else {
+        let devices = hardware::detect_usb_devices()?;
+        if devices.is_empty() {
+            eprintln!("\n❌ ERROR: No USB devices detected.");
+            return Ok(());
+        }
+        devices[0].mount_point.clone()
+    };
 
-    let report = audio_discovery::discover_audio_files(&device.mount_point)?;
+    println!("\n🔍 Scanning for audio files on {}...", mountpoint.display());
+
+    let report = audio_discovery::discover_audio_files(&mountpoint)?;
 
     if report.audio_files.is_empty() {
         println!("❌ No audio files found.");
@@ -246,6 +283,89 @@ fn validate_canonical_paths(
                 usb_can.display()
             ),
         });
+    }
+
+    Ok(())
+}
+
+fn ingest_staging(usb: &Path, source: &Path, json_mode: bool) -> Result<()> {
+    human_out(json_mode, "\n=== Starting Audio Ingestion ===");
+    human_out(
+        json_mode,
+        &format!("USB: {} | Staging: {}", usb.display(), source.display()),
+    );
+
+    let manifest = ingestion::ingest_audio_files(usb, source, json_mode)?;
+
+    human_out(json_mode, "\nIngestion complete.");
+    human_out(
+        json_mode,
+        &format!("Staging directory: {}", manifest.staging_dir.display()),
+    );
+    human_out(
+        json_mode,
+        &format!("Audio files copied: {}", manifest.files.len()),
+    );
+    human_out(
+        json_mode,
+        &format!(
+            "Total size: {:.2} MB",
+            manifest.total_bytes as f64 / 1_048_576.0
+        ),
+    );
+
+    IpcEvent::Success {
+        total_processed: manifest.files.len(),
+        total_skipped: 0,
+        elapsed_time_seconds: 0,
+        message: format!(
+            "Ingesta completada: {} archivos en '{}'",
+            manifest.files.len(),
+            manifest.staging_dir.display()
+        ),
+    }
+    .emit(json_mode);
+
+    Ok(())
+}
+
+fn refactor_usb(usb: &Path, source: &Path, keep_staging: bool, json_mode: bool) -> Result<()> {
+    human_out(json_mode, "\n=== Starting In-Situ Refactor ===");
+    human_out(
+        json_mode,
+        &format!("USB: {} | Work dir: {}", usb.display(), source.display()),
+    );
+
+    // R-30 (pre-ingesta): evita staging dentro del mismo mount USB aun si no existe.
+    let usb_can = usb
+        .canonicalize()
+        .map_err(|e| ProvisioningError::InvalidConfig {
+            details: format!("No se pudo resolver la ruta USB '{}': {}", usb.display(), e),
+        })?;
+    let source_abs = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(source)
+    };
+    if source_abs.starts_with(&usb_can) {
+        return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
+            details: format!(
+                "El staging '{}' no puede estar dentro de la USB de destino '{}'.",
+                source_abs.display(),
+                usb_can.display()
+            ),
+        }));
+    }
+
+    ingest_staging(usb, source, json_mode)?;
+    validate_canonical_paths(usb, source)?;
+    provision_usb(usb, source, false, true, json_mode)?;
+
+    if !keep_staging {
+        fs::remove_dir_all(source).with_context(|| {
+            format!("No se pudo eliminar el staging '{}'", source.display())
+        })?;
+        human_out(json_mode, "Staging local eliminado.");
     }
 
     Ok(())

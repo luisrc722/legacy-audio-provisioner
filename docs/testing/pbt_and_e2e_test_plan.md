@@ -84,7 +84,7 @@ ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -c:a libmp3lame /tmp/legacy_s
 ffmpeg -f lavfi -i "sine=frequency=880:duration=5" -c:a flac /tmp/legacy_source/02.flac
 
 # 3. Lanzar provisión y mutilar proceso atómicamente
-./target/debug/legacy-audio-provisioner provision --usb-mount /tmp/legacy_usb --audio-source /tmp/legacy_source -vv &
+./target/debug/legacy-audio-provisioner provision --usb /tmp/legacy_usb --source /tmp/legacy_source -vv &
 PROV_PID=$!
 
 # Sondear el disco para matar el proceso apenas escriba el primer archivo
@@ -98,7 +98,7 @@ done
 
 # 4. Localizar la bitácora atómica y ejecutar reanudación
 BACKUP_DIR=$(ls -td ~/usb_backup_* | head -1)
-./target/debug/legacy-audio-provisioner resume --usb-mount /tmp/legacy_usb --resume "$BACKUP_DIR" -vv
+./target/debug/legacy-audio-provisioner resume --usb /tmp/legacy_usb --resume "$BACKUP_DIR" -vv
 
 # 5. Verificación Criptográfica Final
 sha256sum /tmp/legacy_usb/VOL_01/*.mp3

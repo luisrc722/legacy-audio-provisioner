@@ -4,7 +4,7 @@
 Aceptado
 
 ## 2. Contexto
-La herramienta `legacy-audio-provisioner` ejecuta operaciones de I/O masivas y destructivas (borrado de inodos huérfanos, normalización y escritura directa) sobre el directorio de destino proporcionado en la CLI (`--usb-mount`).
+La herramienta `legacy-audio-provisioner` ejecuta operaciones de I/O masivas y destructivas (borrado de inodos huérfanos, normalización y escritura directa) sobre el directorio de destino proporcionado en la CLI (`--usb`).
 
 Si un usuario comete un error tipográfico o asigna por accidente un directorio local (ej. `/home/user/musica` o `/dev/sda1`), una validación laxa asumiría que la ruta es válida simplemente porque existe. Esto provocaría la sobrescritura y potencial destrucción de datos en el disco duro principal del sistema operativo host. Se requiere un mecanismo de confianza cero (Zero-Trust) que rechace cualquier ruta que no pertenezca inequívocamente a un medio de almacenamiento extraíble formateado para hardware *legacy*.
 
@@ -18,7 +18,7 @@ El módulo `hardware.rs` implementa una "Doble Cerradura" ineludible:
 ### Diagrama de Flujo (Política de Rechazo)
 ```mermaid
 flowchart TD
-    A[Input CLI: --usb-mount PATH] --> B{¿PATH está en /proc/mounts?}
+    A[Input CLI: --usb PATH] --> B{¿PATH está en /proc/mounts?}
 
     B -->|No| C[Abortar: Ruta Denegada]
     B -->|Sí| D[Extraer fs_type y Dispositivo de Bloque]

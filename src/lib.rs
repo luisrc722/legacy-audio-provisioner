@@ -5,6 +5,7 @@ pub mod distribution;
 pub mod diffing;
 pub mod error;
 pub mod hardware;
+pub mod ingestion;
 pub mod ipc;
 pub mod normalizer;
 pub mod recovery;

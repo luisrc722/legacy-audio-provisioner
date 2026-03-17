@@ -6,7 +6,7 @@ pub enum ProvisioningError {
     #[error("Modo --json no es compatible con {feature}")]
     UnsupportedJsonMode { feature: String },
 
-    #[error("Se requiere --usb-mount junto con --resume")]
+    #[error("Se requiere --usb junto con --resume")]
     MissingUsbMountForResume,
 
     #[error("CONCURRENCY_ERROR: {details}")]
@@ -49,10 +49,10 @@ impl ProvisioningError {
     pub fn action_required(&self) -> &'static str {
         match self {
             ProvisioningError::UnsupportedJsonMode { .. } => {
-                "Use --json solo con --usb-mount/--audio-source o con --resume."
+                "Use --json solo con --usb/--source o con --resume."
             }
             ProvisioningError::MissingUsbMountForResume => {
-                "Agregue --usb-mount <PATH> cuando utilice --resume."
+                "Agregue --usb <PATH> cuando utilice --resume."
             }
             ProvisioningError::ConcurrencyError { .. } => {
                 "Cierre la otra instancia activa o espere a que termine."

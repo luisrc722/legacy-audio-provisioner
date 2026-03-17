@@ -4,8 +4,8 @@
 Contratos formales a nivel de módulo para garantizar la seguridad del hardware del host, la integridad transaccional de los datos y la recuperación determinista en hardware legacy (FAT32, firmware 32-bit).
 
 ## Global Invariants
-- **Inmutabilidad del Origen:** El directorio `--audio-source` es estrictamente de solo lectura. Ningún archivo original debe ser mutado o eliminado bajo ninguna circunstancia.
-- **Seguridad de Destino:** El destino `--usb-mount` debe corresponder obligatoriamente a un dispositivo de bloque físico marcado como removible por el kernel, formateado en FAT32.
+- **Inmutabilidad del Origen:** El directorio `--source` es estrictamente de solo lectura. Ningún archivo original debe ser mutado o eliminado bajo ninguna circunstancia.
+- **Seguridad de Destino:** El destino `--usb` debe corresponder obligatoriamente a un dispositivo de bloque físico marcado como removible por el kernel, formateado en FAT32.
 - **Single Source of Truth:** El archivo JSON del Checkpoint es la única fuente de verdad autorizada para el estado de la provisión y la recuperación ante desastres.
 - **Topología Legacy:** Ningún nombre de archivo en la USB excederá los 32 caracteres ASCII, y ningún directorio contendrá más de 50 archivos.
 

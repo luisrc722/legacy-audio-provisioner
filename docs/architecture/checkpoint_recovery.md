@@ -162,7 +162,7 @@ impl RecoveryManager {
 ```
 1. El checkpoint atómico garantiza el último estado consistente en disco
 2. El usuario reconecta el USB y ejecuta:
-   legacy-audio-provisioner --usb-mount /media/USB --resume ~/usb_backup_20260315_1430/
+   legacy-audio-provisioner --usb /media/USB --resume ~/usb_backup_20260315_1430/
 3. CheckpointManager::load_from_disk() lee el estado
 4. RecoveryManager::execute_recovery() itera sobre archivos InProgress/Failed:
    - Calcula SHA256 real del archivo en USB

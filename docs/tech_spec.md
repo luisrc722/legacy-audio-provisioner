@@ -56,10 +56,17 @@ Los firmwares legacy fallan ante:
 - Politica por defecto no destructiva (sin purga automatica).
 
 ### R-30 Validacion de paths canonicos
-- `--usb-mount` y `--audio-source` no pueden ser el mismo path fisico.
+- `--usb` y `--source` no pueden ser el mismo path fisico.
 - El origen de audio no puede estar anidado dentro del mount de destino USB.
 - Resolucion mediante `std::fs::canonicalize()` antes de iniciar el pipeline (pre-flight).
 - Fallo anticipado con `ProvisioningError::InvalidConfig` y codigo IPC `INVALID_CONFIG`.
+
+### R-31 Ingesta local en Host Storage (staging)
+- La refactorizacion in-situ debe copiar audio desde USB/origen hacia un area de staging en almacenamiento local del host.
+- El staging es hardware-agnostico: puede residir en HDD, SSD, NVMe o RAM-disk.
+- La ingesta es copy-only: no mueve ni borra origen durante la extraccion.
+- Debe mantenerse trazabilidad `source -> staging` con hash SHA256 por archivo.
+- La mutacion de la USB (cuarentena + escritura normalizada) ocurre unicamente en la fase de provision posterior.
 
 ### R-15 Feedback visual
 - Barra de progreso con ETA durante el paso de normalizacion/copia.
@@ -126,6 +133,11 @@ Pipeline de provision:
 9. `checkpoint.finalize` + mirror checkpoint a USB
 10. `verification::safe_eject`
 
+Pipeline de refactorizacion in-situ (R-31):
+1. ingesta copy-only hacia staging en host local
+2. provision desde staging hacia USB (`--sync` recomendado)
+3. cleanup opcional del staging local
+
 Pipeline de recovery:
 1. `checkpoint::load_from_disk`
 2. evaluar `is_recoverable`
@@ -134,10 +146,12 @@ Pipeline de recovery:
 
 ## Operational CLI
 - `list`
-- `scan`
-- `provision --usb-mount <PATH> --audio-source <PATH>`
-- `provision --usb-mount <PATH> --audio-source <PATH> --sync`
-- `resume --usb-mount <PATH> --resume <BACKUP_DIR>`
+- `scan [--usb <PATH>]`
+- `ingest --usb <PATH> --source <PATH>`
+- `provision --usb <PATH> --source <PATH>`
+- `provision --usb <PATH> --source <PATH> --sync`
+- `refactor --usb <PATH> --source <PATH> [--keep-staging]`
+- `resume --usb <PATH> --resume <BACKUP_DIR>`
 - `provision ... --dry-run`
 - `--json` (global)
 

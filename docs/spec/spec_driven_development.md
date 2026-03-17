@@ -386,7 +386,7 @@ Status: ⏳ REQUIRES R-19
 
 ### Escenario 5: Dry Run
 ```
-Command: ./legacy-audio-provisioner --usb-mount /media/user/DISK --audio-source ~/Music --dry-run
+Command: ./legacy-audio-provisioner --usb /media/user/DISK --source ~/Music --dry-run
 Expected Output:
   ✓ Device validated (16GB, FAT32, removible)
   ✓ Found 100 audio files

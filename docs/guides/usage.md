@@ -28,8 +28,8 @@ cargo build --release
 # Ejecutar en modo simulación
 ./target/release/legacy-audio-provisioner \
   provision \
-  --usb-mount /media/usuario/DISCO_USB \
-  --audio-source ~/MiMusica \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
   --dry-run \
   --verbose
 ```
@@ -65,8 +65,8 @@ Una vez que el dry-run se vea bien:
 ```bash
 ./target/release/legacy-audio-provisioner \
   provision \
-  --usb-mount /media/usuario/DISCO_USB \
-  --audio-source ~/MiMusica \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
   --verbose
 ```
 
@@ -77,8 +77,8 @@ Una vez que el dry-run se vea bien:
 ```bash
 ./target/release/legacy-audio-provisioner \
   provision \
-  --usb-mount /media/usuario/DISCO_GRANDE \
-  --audio-source ~/MiMusica \
+  --usb /media/usuario/DISCO_GRANDE \
+  --source ~/MiMusica \
   --verbose
 # Mensaje esperado:
 # ⚠️  Device size: 128.50 GB (requires confirmation for safety)
@@ -89,8 +89,8 @@ Una vez que el dry-run se vea bien:
 ```bash
 RUST_LOG=trace ./target/release/legacy-audio-provisioner \
   provision \
-  --usb-mount /media/usuario/DISCO_USB \
-  --audio-source ~/MiMusica \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
   -vvv
 ```
 
@@ -107,7 +107,7 @@ Si el proceso fue interrumpido (corte de luz, desconexión USB), el checkpoint a
 ```bash
 ./target/release/legacy-audio-provisioner \
   resume \
-  --usb-mount /media/usuario/DISCO_USB \
+  --usb /media/usuario/DISCO_USB \
   --resume ~/usb_backup_20260315_1430
 ```
 
@@ -267,15 +267,15 @@ $ cargo build --release
 
 # 4. Dry-run
 $ ./target/release/legacy-audio-provisioner \
-    --usb-mount /media/user/DISK \
-    --audio-source ~/Music \
+    --usb /media/user/DISK \
+    --source ~/Music \
     --dry-run \
     -v
 
 # 5. Ejecutar en real
 $ ./target/release/legacy-audio-provisioner \
-    --usb-mount /media/user/DISK \
-    --audio-source ~/Music
+    --usb /media/user/DISK \
+    --source ~/Music
 
 # 6. Verificar
 $ ls -la /media/user/DISK/

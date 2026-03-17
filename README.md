@@ -100,35 +100,35 @@ legacy-audio-provisioner scan
 # Simulación sin mutación
 legacy-audio-provisioner \
   provision \
-  --usb-mount /media/user/USB_TARGET \
-  --audio-source ~/Music \
+  --usb /media/user/USB_TARGET \
+  --source ~/Music \
   --dry-run
 
 # Provisión completa
 legacy-audio-provisioner \
   provision \
-  --usb-mount /media/user/USB_TARGET \
-  --audio-source ~/Music
+  --usb /media/user/USB_TARGET \
+  --source ~/Music
 
 # Sincronización incremental
 legacy-audio-provisioner \
   provision \
-  --usb-mount /media/user/USB_TARGET \
-  --audio-source ~/Music \
+  --usb /media/user/USB_TARGET \
+  --source ~/Music \
   --sync
 
 # Eventos IPC JSON
 legacy-audio-provisioner \
   --json \
   provision \
-  --usb-mount /media/user/USB_TARGET \
-  --audio-source ~/Music \
+  --usb /media/user/USB_TARGET \
+  --source ~/Music \
   --sync
 
 # Reanudación tras fallo
 legacy-audio-provisioner \
   resume \
-  --usb-mount /media/user/USB_TARGET \
+  --usb /media/user/USB_TARGET \
   --resume ~/usb_backup_20260315_1430
 ```
 
