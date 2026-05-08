@@ -82,7 +82,19 @@ impl ProcessedFileManifest {
 
         if manifest_path.exists() {
             let content = fs::read_to_string(&manifest_path)?;
-            let manifest: ProcessedFileManifest = serde_json::from_str(&content)?;
+            let manifest: ProcessedFileManifest = match serde_json::from_str(&content) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    log::warn!(
+                        "Manifest corrupt or unreadable at {}: {}. Recreating empty manifest.",
+                        manifest_path.display(),
+                        e
+                    );
+                    let corrupt_path = manifest_path.with_extension("corrupt");
+                    let _ = fs::rename(&manifest_path, &corrupt_path);
+                    return Ok(Self::new());
+                }
+            };
 
             if manifest.version != MANIFEST_VERSION {
                 log::warn!(
@@ -162,6 +174,7 @@ impl ProcessedFileManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -205,5 +218,74 @@ mod tests {
         ));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_manifest_load_or_create_missing_file_returns_empty() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let loaded = ProcessedFileManifest::load_or_create(temp_dir.path())?;
+
+        assert_eq!(loaded.total_processed(), 0);
+        assert!(loaded.entries_by_hash.is_empty());
+        assert!(loaded.entries_by_name.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_manifest_register_same_hash_updates_without_duplication() {
+        let mut manifest = ProcessedFileManifest::new();
+        let hash = "abcd1234567890abcd1234567890abcd1234567890abcd1234567890abcd1234";
+
+        manifest.register_processed_file(
+            "001_first_abcd1234.mp3".to_string(),
+            hash.to_string(),
+            1024,
+            "VOL_01/001_first_abcd1234.mp3".to_string(),
+            1,
+        );
+        manifest.register_processed_file(
+            "002_second_abcd1234.mp3".to_string(),
+            hash.to_string(),
+            2048,
+            "VOL_01/002_second_abcd1234.mp3".to_string(),
+            2,
+        );
+
+        assert_eq!(manifest.total_processed(), 1);
+        assert_eq!(manifest.entries_by_name.len(), 2);
+        assert_eq!(manifest.get_by_hash(hash).map(|e| e.size_bytes), Some(2048));
+    }
+
+    #[test]
+    fn test_manifest_load_or_create_recovers_from_corrupt_json() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let manifest_path = temp_dir.path().join(MANIFEST_FILENAME);
+        fs::write(&manifest_path, "{invalid-json")?;
+
+        let loaded = ProcessedFileManifest::load_or_create(temp_dir.path())?;
+
+        assert_eq!(loaded.total_processed(), 0);
+        assert!(temp_dir.path().join(".provisioning_manifest.corrupt").exists());
+        assert!(!manifest_path.exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_manifest_register_updates_last_updated() {
+        let mut manifest = ProcessedFileManifest::new();
+        let before = manifest.last_updated;
+
+        manifest.register_processed_file(
+            "001_song_abcd1234.mp3".to_string(),
+            "abcd1234567890abcd1234567890abcd1234567890abcd1234567890abcd1234".to_string(),
+            5_000_000,
+            "VOL_01/001_song_abcd1234.mp3".to_string(),
+            0,
+        );
+
+        assert!(manifest.last_updated >= before);
+        assert!(manifest.last_updated - before < Duration::seconds(5));
     }
 }

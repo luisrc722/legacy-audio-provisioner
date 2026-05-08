@@ -385,4 +385,80 @@ mod tests {
 
         assert!(matches!(err, ProvisioningError::StorageFull { .. }));
     }
+
+    #[test]
+    fn test_is_recoverable_true_when_in_progress_with_entries() {
+        let mut checkpoint = CheckpointData::new(
+            PathBuf::from("/tmp/backup"),
+            PathBuf::from("/tmp/usb"),
+            PathBuf::from("/tmp/audio"),
+            1,
+        );
+        checkpoint.processed_files.insert(
+            0,
+            FileCheckpoint {
+                original_path: PathBuf::from("/tmp/audio/a.mp3"),
+                normalized_name: "001_a.mp3".to_string(),
+                status: OperationStatus::InProgress,
+                original_checksum: "hash".to_string(),
+                usb_checksum: None,
+                start_time: Utc::now(),
+                end_time: None,
+                error_message: None,
+            },
+        );
+
+        assert!(checkpoint.is_recoverable());
+    }
+
+    #[test]
+    fn test_is_recoverable_false_when_operation_completed() {
+        let mut checkpoint = CheckpointData::new(
+            PathBuf::from("/tmp/backup"),
+            PathBuf::from("/tmp/usb"),
+            PathBuf::from("/tmp/audio"),
+            1,
+        );
+        checkpoint.processed_files.insert(
+            0,
+            FileCheckpoint {
+                original_path: PathBuf::from("/tmp/audio/a.mp3"),
+                normalized_name: "001_a.mp3".to_string(),
+                status: OperationStatus::Completed,
+                original_checksum: "hash".to_string(),
+                usb_checksum: Some("hash".to_string()),
+                start_time: Utc::now(),
+                end_time: Some(Utc::now()),
+                error_message: None,
+            },
+        );
+        checkpoint.operation_status = OperationStatus::Completed;
+
+        assert!(!checkpoint.is_recoverable());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_checkpoint_storage_full_cleans_tmp_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let checkpoint_path = temp_dir.path().join("checkpoint.json");
+        let tmp_path = temp_dir.path().join("checkpoint.tmp");
+
+        let err = write_json_atomically_to_paths(&checkpoint_path, Path::new("/dev/full"), "{}")
+            .expect_err("Expected /dev/full write to fail with ENOSPC");
+
+        assert!(matches!(err, ProvisioningError::StorageFull { .. }));
+        assert!(!tmp_path.exists());
+        assert!(!checkpoint_path.exists());
+    }
+
+    #[test]
+    fn test_load_from_disk_rejects_invalid_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let checkpoint_path = temp_dir.path().join(".provisioning_checkpoint");
+        std::fs::write(&checkpoint_path, "{invalid-json").unwrap();
+
+        let result = CheckpointManager::load_from_disk(&checkpoint_path);
+        assert!(result.is_err());
+    }
 }
