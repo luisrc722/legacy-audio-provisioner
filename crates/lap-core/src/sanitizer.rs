@@ -144,17 +144,34 @@ mod tests {
             fn prop_sanitize_never_panics_and_filters_correctly(ref input in "\\PC*") {
                 let result = sanitize_filename(input);
 
+                // Los caracteres inválidos no deben filtrarse hacia la salida.
                 let is_valid = result
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
                 prop_assert!(is_valid, "Fuga de caracteres invalidos: {}", result);
+
+                // Los caracteres válidos del input deben sobrevivir en el output.
+                // (una función que devuelva "" siempre pasaría el chequeo anterior)
+                let valid_in_input: String = input
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
+                    .collect();
+                prop_assert_eq!(
+                    result, valid_in_input,
+                    "Se perdieron caracteres validos del input: '{}'",
+                    input
+                );
             }
 
             #[test]
+            /// Usa extensiones cortas realistas (mp3, flac, wav — ≤5 chars) para
+            /// reflejar el dominio real. Con extensiones largas se activa el branch de
+            /// truncamiento absoluto que sacrifica la extensión intencionalmente, pero
+            /// eso nunca ocurre con audio.
             fn prop_prefix_enforces_hardware_limits(
                 ref stem in "[a-zA-Z0-9_-]{0,100}",
-                ref ext in "[a-zA-Z0-9]{0,50}",
-                index in 1usize..9999
+                ref ext in "[a-zA-Z0-9]{0,5}",
+                index in 1usize..=999
             ) {
                 let input = if ext.is_empty() {
                     stem.clone()
@@ -175,6 +192,19 @@ mod tests {
 
                 let prefix = format!("{:03}_", index);
                 prop_assert!(result.starts_with(&prefix), "Prefijo destruido: {}", result);
+
+                // La extensión debe estar intacta cuando cabe dentro del límite (siempre
+                // es verdad para extensiones de audio reales de ≤5 chars con índice ≤999).
+                if !ext.is_empty() {
+                    let ext_suffix = format!(".{}", ext);
+                    prop_assert!(
+                        result.ends_with(&ext_suffix),
+                        "Extension destruida: '{}' no termina en '{}' (input: '{}')",
+                        result,
+                        ext_suffix,
+                        input
+                    );
+                }
             }
         }
     }
