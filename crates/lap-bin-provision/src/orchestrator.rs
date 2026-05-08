@@ -849,22 +849,35 @@ impl ProvisioningOrchestrator {
         )?;
         checkpoint.set_auto_persist(false);
 
-        let file_mappings: Vec<(PathBuf, String)> = audio_files
-            .iter()
-            .enumerate()
-            .map(|(idx, file)| {
-                let stem = file
-                    .path
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("audio");
-                let forced_mp3_name = format!("{}.mp3", stem);
+        let mut file_mappings: Vec<(PathBuf, String)> = Vec::with_capacity(audio_files.len());
+        for (idx, file) in audio_files.iter().enumerate() {
+            let stem = file
+                .path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("audio");
 
-                let sanitized = sanitizer::sanitize_filename(&forced_mp3_name);
-                let indexed = sanitizer::add_sequential_prefix(&sanitized, idx + next_global_index);
-                (file.path.clone(), indexed)
-            })
-            .collect();
+            let content_hash = backup
+                .as_ref()
+                .and_then(|b| b.checksums.get(&file.path))
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    compute_file_sha256(&file.path).with_context(|| {
+                        format!(
+                            "No se pudo calcular SHA256 para naming compacto de '{}'",
+                            file.path.display()
+                        )
+                    })
+                })?;
+
+            let compact_name = sanitizer::build_hashed_legacy_name(
+                stem,
+                idx + next_global_index,
+                &content_hash,
+            );
+            file_mappings.push((file.path.clone(), compact_name));
+        }
 
         let volumes = if sync_mode {
             diffing::plan_incremental_distribution(file_mappings, &existing_volume_counts)

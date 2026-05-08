@@ -9,6 +9,8 @@ use std::sync::OnceLock;
 // - Regex de limpieza: `[^a-zA-Z0-9\.\-\_]`
 
 static SANITIZE_REGEX: OnceLock<Regex> = OnceLock::new();
+const LEGACY_MAX_FILENAME_BYTES: usize = 32;
+const HASH_SUFFIX_HEX_LEN: usize = 8;
 
 fn get_regex() -> &'static Regex {
     SANITIZE_REGEX.get_or_init(|| Regex::new(r"[^a-zA-Z0-9\.\-\_]").unwrap())
@@ -77,6 +79,62 @@ pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
     format!("{}{}{}", prefix, truncated_stem, ext_part)
 }
 
+/// Construye un nombre legacy compacto y determinista orientado a hardware con poca cache.
+///
+/// Formato: `NNN_<stem_truncado>_<hash8>.mp3`
+/// - `NNN_`: indice secuencial (compatibilidad de orden)
+/// - `<stem_truncado>`: nombre sanitizado y truncado por presupuesto de bytes
+/// - `<hash8>`: primeros 8 hex del SHA256 de contenido (unicidad)
+///
+/// Invariante: salida ASCII y longitud <= 32 bytes.
+pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &str) -> String {
+    let prefix = format!("{:03}_", index);
+    let hash8 = hash8_from_sha256_hex(sha256_hex);
+    let suffix = format!("_{}.mp3", hash8);
+
+    if prefix.len() + suffix.len() >= LEGACY_MAX_FILENAME_BYTES {
+        warn!(
+            "Index prefix too large for strict legacy budget ({}): index={}.",
+            LEGACY_MAX_FILENAME_BYTES,
+            index
+        );
+        return format!("{}{}", prefix, suffix)
+            .chars()
+            .take(LEGACY_MAX_FILENAME_BYTES)
+            .collect();
+    }
+
+    let cleaned = sanitize_filename(original_stem);
+    let mut safe_stem = if cleaned.is_empty() {
+        "audio".to_string()
+    } else {
+        cleaned
+    };
+
+    let available_stem_len = LEGACY_MAX_FILENAME_BYTES - prefix.len() - suffix.len();
+    safe_stem = safe_stem.chars().take(available_stem_len).collect();
+    if safe_stem.is_empty() {
+        safe_stem = "a".to_string();
+    }
+
+    format!("{}{}{}", prefix, safe_stem, suffix)
+}
+
+fn hash8_from_sha256_hex(input: &str) -> String {
+    let normalized: String = input
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .map(|c| c.to_ascii_lowercase())
+        .take(HASH_SUFFIX_HEX_LEN)
+        .collect();
+
+    if normalized.len() == HASH_SUFFIX_HEX_LEN {
+        normalized
+    } else {
+        "00000000".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +188,27 @@ mod tests {
         assert_eq!(result.len(), 32);
         assert!(result.ends_with(".mp3"), "La extensión debe estar presente");
         assert!(result.starts_with("005_"), "El prefijo debe estar presente");
+    }
+
+    #[test]
+    fn test_hashed_legacy_name_is_strictly_bounded_and_deterministic() {
+        let result = build_hashed_legacy_name(
+            "Canción súper larga con símbolos 🎵",
+            7,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+
+        assert_eq!(result.len(), 32);
+        assert!(result.starts_with("007_"));
+        assert!(result.ends_with("_01234567.mp3"));
+    }
+
+    #[test]
+    fn test_hashed_legacy_name_fallback_hash_when_invalid() {
+        let result = build_hashed_legacy_name("track", 3, "not-a-valid-sha");
+
+        assert_eq!(result, "003_track_00000000.mp3");
+        assert!(result.len() <= 32);
     }
 
     #[cfg(test)]
