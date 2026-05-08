@@ -10,6 +10,7 @@ pub mod ingestion;
 pub mod in_place_transformer;
 pub mod ipc;
 pub mod journal;
+pub mod manifest;
 pub mod normalizer;
 pub mod recovery;
 pub mod sanitizer;

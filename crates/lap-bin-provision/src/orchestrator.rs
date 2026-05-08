@@ -5,7 +5,7 @@ use lap_core::ipc::IpcEvent;
 use lap_core::security::validate_path_containment;
 use lap_core::{
     audio_discovery, backup, checkpoint, diffing, distribution, hardware, ingestion, journal,
-    in_place_transformer::InPlaceTransformer, normalizer, recovery, sanitizer, verification,
+    in_place_transformer::InPlaceTransformer, manifest, normalizer, recovery, sanitizer, verification,
 };
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -1038,6 +1038,7 @@ impl ProvisioningOrchestrator {
             let mut global_idx = 0;
             let mut skipped_drm = 0usize;
             let mut skipped_failed = 0usize;
+            let mut processed_manifest = manifest::ProcessedFileManifest::load_or_create(usb_mount)?;
             self.reporter.start_progress(audio_files.len() as u64)?;
 
             for volume in volumes {
@@ -1103,7 +1104,17 @@ impl ProvisioningOrchestrator {
                                 ) && dest.exists()
                                 {
                                     let usb_checksum = compute_file_sha256(&dest)?;
-                                    checkpoint.mark_file_completed(global_idx, usb_checksum)?;
+                                    checkpoint.mark_file_completed(global_idx, usb_checksum.clone())?;
+                                    let usb_relative = Self::to_usb_relative(&dest, usb_mount)
+                                        .to_string_lossy()
+                                        .to_string();
+                                    processed_manifest.register_processed_file(
+                                        file.sanitized_name.clone(),
+                                        usb_checksum,
+                                        fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
+                                        usb_relative,
+                                        global_idx,
+                                    );
 
                                     self.reporter.inc_progress(1, &progress_msg);
                                     used_in_place_move = true;
@@ -1154,7 +1165,17 @@ impl ProvisioningOrchestrator {
                                     journal_mgr.mark_committed(&target_rel)?;
                                 }
 
-                                checkpoint.mark_file_completed(global_idx, moved_hash)?;
+                                checkpoint.mark_file_completed(global_idx, moved_hash.clone())?;
+                                let usb_relative = Self::to_usb_relative(&dest, usb_mount)
+                                    .to_string_lossy()
+                                    .to_string();
+                                processed_manifest.register_processed_file(
+                                    file.sanitized_name.clone(),
+                                    moved_hash,
+                                    fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
+                                    usb_relative,
+                                    global_idx,
+                                );
 
                                 self.reporter.inc_progress(1, &progress_msg);
                                 used_in_place_move = true;
@@ -1198,7 +1219,17 @@ impl ProvisioningOrchestrator {
                     match normalizer::normalize_audio(&file.source_path, &dest, processing_decision) {
                         Ok(_) => {
                             let usb_checksum = compute_file_sha256(&dest)?;
-                            checkpoint.mark_file_completed(global_idx, usb_checksum)?;
+                            checkpoint.mark_file_completed(global_idx, usb_checksum.clone())?;
+                            let usb_relative = Self::to_usb_relative(&dest, usb_mount)
+                                .to_string_lossy()
+                                .to_string();
+                            processed_manifest.register_processed_file(
+                                file.sanitized_name.clone(),
+                                usb_checksum,
+                                fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
+                                usb_relative,
+                                global_idx,
+                            );
                             let files_processed = global_idx + 1;
                             self.reporter.inc_progress(1, &progress_msg);
                             let percentage = if audio_files.is_empty() {
@@ -1272,6 +1303,9 @@ impl ProvisioningOrchestrator {
                     }
                     global_idx += 1;
                 }
+
+                // Guardar manifest cada volumen completado para persistencia incremental
+                processed_manifest.save_to_usb(usb_mount)?;
 
                 // [R-02-010] Mitigacion de Desgaste NAND / Optimizacion I/O
                 // Politica: no forzar sync por cada archivo; se consolida flush al cierre de volumen
