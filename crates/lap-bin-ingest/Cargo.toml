@@ -1,0 +1,13 @@
+[package]
+name = "lap-bin-ingest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+lap-core = { path = "../lap-core" }
+anyhow.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+serde.workspace = true
+serde_json.workspace = true

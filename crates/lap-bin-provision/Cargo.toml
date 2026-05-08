@@ -1,0 +1,20 @@
+[package]
+name = "lap-bin-provision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+lap-core = { path = "../lap-core" }
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+hex.workspace = true
+indicatif.workspace = true
+log.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
