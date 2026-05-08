@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use chrono::Local;
 use lap_core::crypto::compute_file_sha256;
 use lap_core::error::ProvisioningError;
 use lap_core::ipc::IpcEvent;
@@ -8,7 +7,7 @@ use lap_core::{
     audio_discovery, backup, checkpoint, diffing, distribution, hardware, ingestion, journal,
     in_place_transformer::InPlaceTransformer, normalizer, recovery, sanitizer, verification,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -383,7 +382,7 @@ impl ProvisioningOrchestrator {
         let checkpoint_dir = Path::new(&home)
             .join(".legacy_audio_provisioner")
             .join("checkpoints")
-            .join(format!("in_place_{}", Local::now().format("%Y%m%d_%H%M%S")));
+            .join(format!("in_place_{}", device.backup_identity_key()));
         fs::create_dir_all(&checkpoint_dir).with_context(|| {
             format!(
                 "No se pudo crear directorio de checkpoint '{}'",
@@ -391,12 +390,48 @@ impl ProvisioningOrchestrator {
             )
         })?;
 
-        let mut checkpoint = checkpoint::CheckpointManager::new(
-            checkpoint_dir,
-            usb_mount.to_path_buf(),
-            usb_mount.to_path_buf(),
-            plan.entries.len(),
-        )?;
+        let checkpoint_file = checkpoint_dir.join(".provisioning_checkpoint");
+        let mut resumed_mode = false;
+        let mut checkpoint = if checkpoint_file.exists() {
+            match checkpoint::CheckpointManager::load_from_disk(&checkpoint_file) {
+                Ok(existing) => {
+                    let data = existing.get_data();
+                    if data.operation_status == checkpoint::OperationStatus::InProgress
+                        && data.total_files == plan.entries.len()
+                    {
+                        resumed_mode = true;
+                        self.reporter.info(&format!(
+                            "Checkpoint in-place detectado (sesion {}). Reanudando...",
+                            data.session_id
+                        ));
+                        existing
+                    } else {
+                        self.reporter.info(
+                            "Checkpoint previo no reanudable (completado o total distinto). Se iniciara una nueva sesion in-place.",
+                        );
+                        checkpoint::CheckpointManager::new(
+                            checkpoint_dir,
+                            usb_mount.to_path_buf(),
+                            usb_mount.to_path_buf(),
+                            plan.entries.len(),
+                        )?
+                    }
+                }
+                Err(_) => checkpoint::CheckpointManager::new(
+                    checkpoint_dir,
+                    usb_mount.to_path_buf(),
+                    usb_mount.to_path_buf(),
+                    plan.entries.len(),
+                )?,
+            }
+        } else {
+            checkpoint::CheckpointManager::new(
+                checkpoint_dir,
+                usb_mount.to_path_buf(),
+                usb_mount.to_path_buf(),
+                plan.entries.len(),
+            )?
+        };
         checkpoint.set_auto_persist(false);
 
         self.reporter
@@ -404,11 +439,44 @@ impl ProvisioningOrchestrator {
         self.reporter.start_progress(plan.entries.len() as u64)?;
 
         let temp_root = validate_path_containment(usb_mount, Path::new(".in_place_rebuild_tmp"))?;
+        if resumed_mode && temp_root.exists() {
+            // Si hubo corte previo, descartamos artefactos intermedios para retomar desde estado estable.
+            let _ = fs::remove_dir_all(&temp_root);
+        }
         fs::create_dir_all(&temp_root)?;
 
+        let resumed_completed_hashes: HashMap<usize, String> = checkpoint
+            .get_data()
+            .processed_files
+            .iter()
+            .filter_map(|(idx, cp)| {
+                if cp.status == checkpoint::OperationStatus::Completed {
+                    cp.usb_checksum.clone().map(|h| (*idx, h))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut resumed_skipped = 0usize;
         let mut staged_entries: Vec<(usize, PathBuf, PathBuf, String, String)> = Vec::new();
 
         for entry in &plan.entries {
+            if let Some(expected_hash) = resumed_completed_hashes.get(&entry.index) {
+                let already_completed = entry.destination_path.exists()
+                    && compute_file_sha256(&entry.destination_path)
+                        .map(|actual| actual == *expected_hash)
+                        .unwrap_or(false);
+                if already_completed {
+                    resumed_skipped += 1;
+                    self.reporter.inc_progress(
+                        1,
+                        &format!("[RESUME] already completed: {}", entry.normalized_name),
+                    );
+                    continue;
+                }
+            }
+
             checkpoint.record_file_start(
                 entry.index,
                 entry.source_path.clone(),
@@ -433,6 +501,13 @@ impl ProvisioningOrchestrator {
                 entry.destination_path.clone(),
                 entry.volume_name.clone(),
                 entry.normalized_name.clone(),
+            ));
+        }
+
+        if resumed_skipped > 0 {
+            self.reporter.info(&format!(
+                "Reanudacion in-place: {} archivo(s) ya completado(s) fueron omitidos.",
+                resumed_skipped
             ));
         }
 
