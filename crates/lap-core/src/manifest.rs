@@ -68,8 +68,15 @@ impl ProcessedFileManifest {
             entries_by_name: BTreeMap::new(),
         }
     }
+}
 
-    /// Cargar manifest desde la USB (o crear uno vacío si no existe)
+impl Default for ProcessedFileManifest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProcessedFileManifest {
     pub fn load_or_create(usb_mount: &Path) -> Result<Self> {
         let manifest_path = usb_mount.join(MANIFEST_FILENAME);
 
