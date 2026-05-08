@@ -1,3 +1,4 @@
+use log::warn;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -24,7 +25,14 @@ fn get_regex() -> &'static Regex {
 /// assert_eq!(cleaned, "Cancin_2024_xito.mp3");
 /// ```
 pub fn sanitize_filename(input: &str) -> String {
-    get_regex().replace_all(input, "").into_owned()
+    let result = get_regex().replace_all(input, "").into_owned();
+    if result != input {
+        warn!(
+            "Filename sanitized (non-ASCII/invalid chars removed): '{}' → '{}'",
+            input, result
+        );
+    }
+    result
 }
 
 /// Añade el prefijo secuencial y asegura de forma inteligente el límite de 32 caracteres
