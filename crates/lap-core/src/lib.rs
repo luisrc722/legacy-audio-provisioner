@@ -1,0 +1,17 @@
+pub mod audio_discovery;
+pub mod backup;
+pub mod checkpoint;
+pub mod crypto;
+pub mod diffing;
+pub mod distribution;
+pub mod error;
+pub mod hardware;
+pub mod ingestion;
+pub mod in_place_transformer;
+pub mod ipc;
+pub mod journal;
+pub mod normalizer;
+pub mod recovery;
+pub mod sanitizer;
+pub mod security;
+pub mod verification;
