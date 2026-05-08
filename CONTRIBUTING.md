@@ -7,9 +7,10 @@ Legacy Audio Provisioner es un proyecto de **Spec-Driven Development** enfocado 
 ## Antes de Empezar
 
 Familiarízate con:
-1. **SPECIFICATION**: Leer [docs/spec/spec_driven_development.md](docs/spec/spec_driven_development.md)
+1. **SPECIFICATION**: Leer [docs/spec/requirements_traceability.md](docs/spec/requirements_traceability.md) y [docs/guides/requirements_workflow.md](docs/guides/requirements_workflow.md)
 2. **ARCHITECTURE**: Entender el flujo en [docs/architecture/architecture_overview.md](docs/architecture/architecture_overview.md)
 3. **CODE**: Revisar la estructura actual en `src/`
+4. **AI DOC PROMPT** (si usas IA para ADR/spec): usar [docs/guides/ai_master_prompt_google_style.md](docs/guides/ai_master_prompt_google_style.md)
 
 ## Setup de Desarrollo
 
@@ -24,6 +25,31 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Compilar y probar
 make build
 make test
+```
+
+## Gobernanza Local (Obligatorio)
+
+Este proyecto usa **Git hooks locales** como mecanismo de trazabilidad. No hay dependencia de CI en la nube.
+El hook de `pre-commit` ejecuta `scripts/traceability_lint.sh` y **bloquea el commit** si el matrix y el código no son consistentes. Esto implementa [R-25-005].
+
+```bash
+# Instalar el hook (una sola vez, después de clonar)
+chmod +x scripts/traceability_lint.sh
+chmod +x .git/hooks/pre-commit
+```
+
+> El hook ya está en `.git/hooks/pre-commit`. Si ese archivo no existe (e.g. después de un `git clone` fresco),
+> cópialo desde la plantilla incluida o ejecútalo manualmente antes de cada commit:
+> `bash scripts/traceability_lint.sh`
+
+Para ejecutar el linter en cualquier momento:
+
+```bash
+# Validación normal (falla en IMPLEMENTED/VERIFIED sin ancla, advierte en PROPOSED)
+bash scripts/traceability_lint.sh
+
+# Modo estricto: falla también en PROPOSED sin ancla (usar antes de un release)
+STRICT_PROPOSED=1 bash scripts/traceability_lint.sh
 ```
 
 ## Herramientas Útiles
@@ -176,6 +202,9 @@ git commit -m "feat(sanitizer): support unicode normalization"
 git push origin feature/implement-unicode-support
 ```
 
+> Al ejecutar `git commit`, el hook de `pre-commit` corre `scripts/traceability_lint.sh` automáticamente.
+> Si el lint falla, el commit es abortado. Resuelve los errores de trazabilidad antes de reintentar.
+
 ### 5. Pull Request
 
 Describe:
@@ -227,10 +256,7 @@ pub fn strip_id3v2(file_path: &Path) -> Result<()> {
     // 4. Crear nuevo archivo sin los primeros N bytes
     // 5. Reemplazar original
 }
-
-// Hardening de validación bitrate/codec
-pub fn normalize_bitrate(file_path: &Path, target_kbps: u32) -> Result<()> {
-    // Estado actual: transcodificación a MP3 CBR para entradas incompatibles
+- [ ] Cobertura E2E destructiva adicional (adversarial para R-02-* y R-05-*)
     // TODO: agregar perfiles por generación de firmware
 }
 ```
@@ -263,7 +289,7 @@ pub fn copy_directory_with_progress(
     dest: &Path,
 ) -> Result<u64> {
     // Copia nativa usando std::fs + hashing SHA256 en streaming
-    // (ver implementación real en src/backup.rs)
+    // (ver implementación real en crates/lap-core/src/backup.rs)
 }
 ```
 
@@ -370,9 +396,10 @@ cargo flamegraph -- --usb-mount /tmp --audio-source .
 
 Si cambias el comportamiento, actualiza:
 
-1. `docs/spec/spec_driven_development.md` (seccion relevante)
+1. `docs/spec/requirements_traceability.md` y `docs/guides/requirements_workflow.md` (sección relevante)
 2. `README.md` (features list)
-3. Docstrings en código (comentarios R-XX)
+3. Docstrings en código (anclas `R-CC-NNN`)
+4. Si el documento fue generado con IA, verificar que cumple la plantilla `docs/guides/ai_master_prompt_google_style.md`
 
 ### Changelog
 

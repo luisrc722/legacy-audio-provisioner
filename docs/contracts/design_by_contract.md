@@ -6,6 +6,7 @@ Contratos formales a nivel de módulo para garantizar la seguridad del hardware 
 ## Global Invariants
 - **Inmutabilidad del Origen:** El directorio `--source` es estrictamente de solo lectura. Ningún archivo original debe ser mutado o eliminado bajo ninguna circunstancia.
 - **Seguridad de Destino:** El destino `--usb` debe corresponder obligatoriamente a un dispositivo de bloque físico marcado como removible por el kernel, formateado en FAT32.
+- **Perfil Legacy del Volumen:** Cuando el boot sector FAT32 sea legible, el allocation unit debe ser de 32 KB para maximizar compatibilidad con estéreos legacy con cache limitada.
 - **Single Source of Truth:** El archivo JSON del Checkpoint es la única fuente de verdad autorizada para el estado de la provisión y la recuperación ante desastres.
 - **Topología Legacy:** Ningún nombre de archivo en la USB excederá los 32 caracteres ASCII, y ningún directorio contendrá más de 50 archivos.
 
@@ -16,7 +17,7 @@ Contratos formales a nivel de módulo para garantizar la seguridad del hardware 
 ### `hardware`
 #### `validate_device_path(target_mount_point)`
 * **Preconditions:** `target_mount_point` debe existir como un path absoluto inyectado por la CLI.
-* **Postconditions:** Retorna `DeviceInfo` con el bloque físico padre resuelto (ej. `sdb`, `mmcblk0`). Retorna `Err` si el `fs_type` no es FAT32 o si el bit `/sys/block/X/removable` es `0`. Levanta un flag de advertencia si la capacidad $> 64GB$.
+* **Postconditions:** Retorna `DeviceInfo` con el bloque físico padre resuelto (ej. `sdb`, `mmcblk0`). Retorna `Err` si el `fs_type` no es FAT32, si el bit `/sys/block/X/removable` es `0`, o si el allocation unit FAT32 detectable no coincide con 32 KB. Levanta un flag de advertencia si la capacidad $> 64GB$.
 * **Invariants:** No se debe asumir, sintetizar ni falsear la propiedad `is_removable`. La lectura es directa al kernel.
 
 ### `audio_discovery`

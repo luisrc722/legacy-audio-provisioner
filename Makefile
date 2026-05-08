@@ -2,10 +2,10 @@
 
 # Legacy Audio Provisioner - Build & Test Makefile
 
-.PHONY: help build release test test-verbose test-unit test-integration clean run dev docs
+.PHONY: help build release test test-verbose test-unit test-integration clean run run-list dev docs
 
 CARGO := cargo
-BINARY := legacy-audio-provisioner
+PROVISION_BIN := lap-bin-provision
 
 help:
 	@echo "Legacy Audio Provisioner - Build Tasks"
@@ -27,14 +27,14 @@ help:
 	@echo ""
 
 build:
-	@echo "🔨 Building debug binary..."
-	@$(CARGO) build
-	@echo "✓ Debug binary: ./target/debug/$(BINARY)"
+	@echo "🔨 Building workspace (debug)..."
+	@$(CARGO) build --workspace
+	@echo "✓ Build completed for workspace crates"
 
 release:
-	@echo "🔨 Building optimized release binary..."
-	@$(CARGO) build --release
-	@echo "✓ Release binary: ./target/release/$(BINARY)"
+	@echo "🔨 Building workspace (release)..."
+	@$(CARGO) build --workspace --release
+	@echo "✓ Release build completed for workspace crates"
 
 test:
 	@echo "🧪 Running all tests..."
@@ -46,7 +46,7 @@ test-verbose:
 
 test-unit:
 	@echo "🧪 Running unit tests..."
-	@$(CARGO) test --lib
+	@$(CARGO) test -p lap-core --lib
 
 coverage:
 	@echo "📊 Generating coverage report..."
@@ -63,15 +63,15 @@ clean:
 run: build
 	@echo "🚀 Running with example arguments..."
 	@echo "Note: modify the paths below to match your system"
-	@./target/debug/$(BINARY) \
-		--usb-mount /tmp/usb_test \
-		--audio-source . \
-		--dry-run \
-		--verbose
+	@$(CARGO) run -p $(PROVISION_BIN) -- \
+		provision \
+		--usb /tmp/usb_test \
+		--source . \
+		--dry-run
 
 run-list: build
 	@echo "📋 Listing USB devices..."
-	@./target/debug/$(BINARY) --list-devices
+	@$(CARGO) run -p $(PROVISION_BIN) -- list
 
 dev:
 	@echo "👀 Watching for changes..."

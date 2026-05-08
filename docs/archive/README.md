@@ -1,11 +1,6 @@
 # Archive
 
-Historical and audit documents moved from repository root.
+Contenido histórico movido a backup tar.gz para limpieza de árbol.
 
-- `AUDIT_MAIN_RS.md`
-- `AUDIT_RESOLUTION_REPORT.md`
-- `DEPENDENCIES_AUDIT.md`
-- `GUIDE_SOFTWARE_DEVELOPMENT.md`
-- `PROJECT_SUMMARY.md`
-
-These files are preserved for traceability and should not be treated as current normative specs.
+Respaldo generado:
+- `backups/docs_archive_20260324_194040.tar.gz`

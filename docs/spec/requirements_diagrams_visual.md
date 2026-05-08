@@ -43,7 +43,7 @@ flowchart TD
     G --> H[R-06 Normalizar y copiar]
     H --> I[R-T5 Verificar estructura e integridad]
     I --> J[Finalizar checkpoint]
-    J --> K[Safe eject]
+    J --> K[Expulsión segura]
 
     H --> L{Fallo/interrupcion?}
     L -- Si --> M[R-17 Recovery con --resume]
@@ -55,16 +55,16 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    R03[R-03] --> S[src/sanitizer.rs]
-    R04[R-04] --> H[src/hardware.rs]
-    R05[R-05] --> B[src/backup.rs]
-    R06[R-06] --> A[src/audio_discovery.rs]
-    R06 --> N[src/normalizer.rs]
-    R07[R-07] --> D[src/distribution.rs]
-    R16[R-16] --> C[src/checkpoint.rs]
-    R17[R-17] --> R[src/recovery.rs]
-    RT5[R-T5] --> V[src/verification.rs]
-    ORCH[Orquestacion] --> M[src/main.rs]
+    R03[R-03] --> S[crates/lap-core/src/sanitizer.rs]
+    R04[R-04] --> H[crates/lap-core/src/hardware.rs]
+    R05[R-05] --> B[crates/lap-core/src/backup.rs]
+    R06[R-06] --> A[crates/lap-core/src/audio_discovery.rs]
+    R06 --> N[crates/lap-core/src/normalizer.rs]
+    R07[R-07] --> D[crates/lap-core/src/distribution.rs]
+    R16[R-16] --> C[crates/lap-core/src/checkpoint.rs]
+    R17[R-17] --> R[crates/lap-core/src/recovery.rs]
+    RT5[R-T5] --> V[crates/lap-core/src/verification.rs]
+    ORCH[Orquestacion] --> M[crates/lap-bin-provision/src/orchestrator.rs]
 ```
 
 ## 4) Trazabilidad Requisito -> Pruebas
@@ -77,7 +77,7 @@ flowchart LR
     R05[R-05 Backup] --> T4[test_04_end_to_end_backup_integration]
     SYS[Dependencias runtime] --> T0[test_00_system_dependencies]
 
-    T1 --> IT[tests/integration_test.rs]
+    T1 --> IT[crates/lap-core/tests/integration_test.rs]
     T2 --> IT
     T3 --> IT
     T4 --> IT
@@ -98,7 +98,7 @@ flowchart LR
 - Si cambias reanudacion tras fallo: impacta `R-16` y `R-17`.
 - Si cambias validacion final antes de expulsar: impacta `R-T5`.
 
-## 7) Patron Industrial Mermaid (Docs-as-Code)
+## 7) Patrón Industrial Mermaid (Docs-as-Code)
 
 Markdown puro no renderiza diagramas por si solo. En la practica, el estandar en repositorios es usar bloques `mermaid` para documentacion viva en GitHub/GitLab/VS Code.
 
@@ -110,15 +110,15 @@ graph TD
     B --> C{Es MP3 seguro?}
 
     C -->|Si: CBR 128k-192k| D[Passthrough]
-    C -->|No: FLAC/VBR| E[FFmpeg transcode]
+    C -->|No: FLAC/VBR| E[FFmpeg transcodificar]
 
-    E -->|Strip metadata| F[Sanitizer <= 32 chars]
+    E -->|Limpiar metadatos| F[Sanitizer <= 32 chars]
     D --> F
 
     F --> G[(USB VOL_XX)]
     G --> H{Verificacion SHA256}
-    H -->|Match| I[Checkpoint Completed]
-    H -->|Mismatch| J[Checkpoint Failed]
+    H -->|Coincide| I[Checkpoint Completado]
+    H -->|No coincide| J[Checkpoint Fallido]
 ```
 
 ### 7.2 State Diagram (Checkpoint)
@@ -134,7 +134,7 @@ stateDiagram-v2
     Completed --> [*] : finalize()
 ```
 
-### 7.3 Sequence Diagram (Safe Eject)
+### 7.3 Sequence Diagram (Expulsión Segura)
 
 ```mermaid
 sequenceDiagram
@@ -148,7 +148,7 @@ sequenceDiagram
     V->>O: Reporte OK
     O->>V: safe_eject()
     V->>K: sync
-    Note over K,U: Flush page cache a memoria flash
+    Note over K,U: Volcar page cache a memoria flash
     V->>K: umount <mount_point>
     V->>K: udisksctl power-off -b <device>
     K->>U: Corta energia del puerto

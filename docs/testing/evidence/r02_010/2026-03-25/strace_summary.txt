@@ -1,0 +1,7 @@
+Session log: /home/dev/.legacy_audio_provisioner/logs/session_20260325_000723_13394/provisioning.log
+[2026-03-25T06:07:23Z WARN  lap_core::hardware] Lock huérfano detectado de PID muerto (10166). Purgando...
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+100.00    1.225991         137      8913           fsync
+------ ----------- ----------- --------- --------- ----------------
+100.00    1.225991         137      8913           total

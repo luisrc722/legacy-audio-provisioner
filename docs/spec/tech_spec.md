@@ -1,9 +1,9 @@
 # Legacy Audio Provisioner - Tech Spec Consolidado
 
-## Scope
-Herramienta CLI para preparar USBs compatibles con firmware legacy de audio (32-bit, FAT32 fragil) con pipeline transaccional, recovery granular y verificacion criptografica.
+## Alcance
+Herramienta CLI para preparar USBs compatibles con firmware legacy de audio (32-bit, FAT32 fragil) con pipeline transaccional, recuperacion granular y verificacion criptografica.
 
-## Problem Statement
+## Planteamiento del Problema
 Los firmwares legacy fallan ante:
 - Jerarquias profundas de directorios.
 - Nombres largos/no ASCII.
@@ -11,34 +11,38 @@ Los firmwares legacy fallan ante:
 - Formatos/bitrate incompatibles.
 - Escrituras interrumpidas sin checkpoint atomico.
 
-## System Constraints
+## Restricciones del Sistema
 - Filesystem objetivo: `vfat`/FAT32.
+- Allocation unit objetivo para firmware legacy: 32 KB cuando pueda verificarse desde el boot sector FAT32.
 - Directorios: maximo 2 niveles (`ROOT -> VOL_XX -> archivo`).
 - Archivos por volumen: maximo 50.
 - Nombre final: <= 32 caracteres ASCII.
 - Escritura secuencial y sincronizacion de directorio para minimizar riesgo FAT inconsistente.
 
-## Functional Requirements
+## Requisitos Funcionales
 ### R-03 Sanitizacion
 - Eliminar caracteres no permitidos.
 - Mantener extension de archivo.
 - Prefijo secuencial (`001_`, `002_`, ...).
-- Enforce `<= 32` caracteres en el nombre final.
+- Forzar `<= 32` caracteres en el nombre final.
 
 ### R-04 Validacion de hardware
 - Detectar dispositivos montados desde `/proc/mounts`.
 - Permitir solo `/dev/*` en FAT32 y removibles segun `/sys/block/*/removable`.
+- Validar allocation unit FAT32 de 32 KB cuando el boot sector sea legible; si no puede determinarse, continuar en modo best-effort con advertencia.
 - Denegar rutas locales que no correspondan a mountpoint de bloque.
 
 ### R-05 Backup + integridad
-- Crear backup local de trabajo con timestamp.
+- Crear backup local de trabajo estable por dispositivo.
 - Verificar espacio disponible previo.
 - Calcular y verificar checksums en backup.
 
 ### R-06 Discovery + normalizacion
 - Escaneo recursivo con poda temprana de entradas ocultas/sistema.
 - Soporte de extensiones de audio definidas.
-- Normalizacion via ffmpeg/ffprobe en escritura fisica para salida MP3 compatible.
+- Modo estandar: normalizacion via ffmpeg/ffprobe en escritura fisica para salida MP3 compatible.
+- Lectura explicita via ffprobe de streams/tags para detectar portadas embebidas (ID3/APIC/covr) antes de purga.
+- Modo `--in-place-rebuild`: no hay transcodificacion; se aplica solo reindexado topologico y renombrado en el mismo filesystem via `std::fs::rename`.
 
 ### R-07 Distribucion
 - Planificador puro en memoria que agrupa en `VOL_XX` de 50 archivos maximo.
@@ -46,9 +50,19 @@ Los firmwares legacy fallan ante:
 
 ### R-23 Sync incremental
 - Modo `--sync` con diff SHA256 entre origen y USB.
+- El calculo SHA256 se centraliza en `lap-core::crypto::compute_file_sha256` para evitar duplicacion.
 - La USB opera como fuente de verdad mediante `.provisioning_checkpoint` espejado.
 - Continuidad de indices globales: nuevos archivos empiezan en `N+1` sin colisiones.
 - Relleno del ultimo volumen parcial antes de abrir nuevo `VOL_XX`.
+
+### R-01-006 EntryPoint delgada + Orquestacion
+- El binario CLI (`main`) solo inicializa logging/runtime, parsea comandos y delega.
+- El flujo de negocio vive en `ProvisioningOrchestrator` para preservar SRP y facilitar evolucion.
+
+### R-01-007 Abstraccion de progreso
+- El avance operativo se reporta via trait `ProgressReporter`.
+- Implementaciones actuales: `CliReporter` (indicatif) y `JsonIpcReporter`.
+- La logica de provisionamiento no depende de salida de terminal concreta.
 
 ### R-25/R-26 Cuarentena de untracked
 - Archivos no rastreados en USB se aislan en `.legacy_quarantine/<session>`.
@@ -60,13 +74,15 @@ Los firmwares legacy fallan ante:
 - El origen de audio no puede estar anidado dentro del mount de destino USB.
 - Resolucion mediante `std::fs::canonicalize()` antes de iniciar el pipeline (pre-flight).
 - Fallo anticipado con `ProvisioningError::InvalidConfig` y codigo IPC `INVALID_CONFIG`.
+- Excepcion explicita: en `--in-place-rebuild`, `--source` debe resolver al mismo mount que `--usb`.
 
 ### R-31 Ingesta local en Host Storage (staging)
 - La refactorizacion in-situ debe copiar audio desde USB/origen hacia un area de staging en almacenamiento local del host.
-- El staging es hardware-agnostico: puede residir en HDD, SSD, NVMe o RAM-disk.
-- La ingesta es copy-only: no mueve ni borra origen durante la extraccion.
+- El staging es agnostico al hardware: puede residir en HDD, SSD, NVMe o RAM-disk.
+- La ingesta es solo copia: no mueve ni borra origen durante la extraccion.
 - Debe mantenerse trazabilidad `source -> staging` con hash SHA256 por archivo.
 - La mutacion de la USB (cuarentena + escritura normalizada) ocurre unicamente en la fase de provision posterior.
+- Este requisito no aplica cuando se ejecuta `--in-place-rebuild`.
 
 ### R-15 Feedback visual
 - Barra de progreso con ETA durante el paso de normalizacion/copia.
@@ -74,8 +90,9 @@ Los firmwares legacy fallan ante:
 ### R-16 Checkpoint atomico
 - Estado por archivo en `BTreeMap<usize, FileCheckpoint>`.
 - Persistencia atomica `tmp -> sync_all -> rename`.
+- Politica de flush en `--in-place-rebuild`: actualizar estado por archivo en memoria y persistir a disco al cierre de cada volumen (`50` archivos) o al final de la ejecucion.
 
-### R-17 Recovery
+### R-17 Recuperacion
 - Reanudacion con `--resume <backup_dir>`.
 - Reintento granular de faltantes/corruptos usando normalizador.
 - Backfill de checksums legacy invalidos.
@@ -88,80 +105,93 @@ Los firmwares legacy fallan ante:
 ### Contrato de errores e IPC
 - Errores de dominio en `ProvisioningError` (`ENOSPC_ERROR`, `HARDWARE_FRAUD_DETECTED`, etc.).
 - Eventos JSON en `ipc::IpcEvent`: `PROGRESS`, `WARNING`, `FATAL_ERROR`, `SUCCESS`.
+- El reporte de progreso humano/CLI se desacopla del IPC via `ProgressReporter`.
 
-## Current Architecture (Implementation)
+## Arquitectura Actual (Implementacion)
 
-### Provision Pipeline (Visual)
+### Pipeline de Provision (Visual)
 
 ```mermaid
 flowchart TD
 	A[validate_device_path + RW check + lock] --> B[discover_audio_files]
-	B --> C{--sync}
-	C -- yes --> D[calculate_sync_diff]
-	C -- no --> E[full source set]
-	D --> F[backup + quarantine_untracked]
-	E --> F
-	F --> G[sanitize + plan_distribution]
-	G --> H[normalize_audio + checkpoint per file]
-	H --> I[pre_eject_verification]
-	I --> J[checkpoint finalize + mirror to USB]
-	J --> K[safe_eject]
+	B --> C{--in-place-rebuild}
+	C -- si --> D[sanitizar + plan_distribution]
+	D --> E[rename in-place + checkpoint diferido por volumen]
+	E --> I[pre_eject_verification]
+	C -- no --> F{--sync}
+	F -- si --> G[calculate_sync_diff]
+	F -- no --> H[conjunto de origen completo]
+	G --> J[backup + quarantine_untracked]
+	H --> J
+	J --> K[sanitizar + plan_distribution]
+	K --> L[normalize_audio + checkpoint por archivo]
+	L --> I
+	I --> M[checkpoint finalize + espejo a USB]
+	M --> N[safe_eject]
 ```
 
-### Failure/Recovery Loop (Visual)
+### Bucle de Fallo/Recuperacion (Visual)
 
 ```mermaid
 stateDiagram-v2
-	[*] --> InProgress
-	InProgress --> Completed: file normalized + hash validated
-	InProgress --> Failed: io/codec/fs error
-	Failed --> Resume: --resume
-	Resume --> InProgress: recovery::execute_recovery
-	Completed --> Finalized: checkpoint.finalize
-	Finalized --> [*]
+	[*] --> EnProgreso
+	EnProgreso --> Completado: archivo normalizado + hash validado
+	EnProgreso --> Fallido: error de io/codec/fs
+	Fallido --> Reanudar: --resume
+	Reanudar --> EnProgreso: recovery::execute_recovery
+	Completado --> Finalizado: checkpoint.finalize
+	Finalizado --> [*]
 ```
 
 Pipeline de provision:
-1. `hardware::validate_device_path`
-2. `audio_discovery::discover_audio_files`
-3. `diffing::calculate_sync_diff` (si `--sync`)
-4. `backup` + validacion espacio/checksum
-5. cuarentena backup-first de untracked (`diffing::quarantine_untracked_files`, si aplica)
-6. sanitizacion + `distribution::plan_distribution` o `diffing::plan_incremental_distribution`
-7. normalizacion fisica + `checkpoint` por archivo + progress bar
-8. `verification::pre_eject_verification`
-9. `checkpoint.finalize` + mirror checkpoint a USB
-10. `verification::safe_eject`
+1. `main` parsea CLI y delega a `ProvisioningOrchestrator`
+2. `hardware::validate_device_path`
+3. branch por modo:
+	- `--in-place-rebuild`: `InPlaceTransformer::build_plan` + `std::fs::rename` (sin ffmpeg, sin staging)
+	- modo estandar: `audio_discovery::discover_audio_files` y, si aplica, `diffing::calculate_sync_diff`
+4. modo estandar: `backup` + validacion espacio/checksum
+5. modo estandar: cuarentena con backup-first de no rastreados (`diffing::quarantine_untracked_files`, si aplica)
+6. sanitizacion + `distribution::plan_distribution` (o incremental)
+7. aplicacion fisica:
+	- in-place: renombrado en el mismo mount FAT32
+	- estandar: normalizacion fisica + copia
+8. checkpoint:
+	- in-place: persistencia diferida por volumen de 50
+	- estandar: persistencia por archivo
+9. `verification::pre_eject_verification`
+10. `checkpoint.finalize` + espejo de checkpoint a USB
+11. `verification::safe_eject`
 
 Pipeline de refactorizacion in-situ (R-31):
 1. ingesta copy-only hacia staging en host local
 2. provision desde staging hacia USB (`--sync` recomendado)
 3. cleanup opcional del staging local
 
-Pipeline de recovery:
+Pipeline de recuperacion:
 1. `checkpoint::load_from_disk`
 2. evaluar `is_recoverable`
 3. `recovery::execute_recovery`
 4. terminar cuando hashes y estado convergen
 
-## Operational CLI
+## CLI Operacional
 - `list`
 - `scan [--usb <PATH>]`
 - `ingest --usb <PATH> --source <PATH>`
 - `provision --usb <PATH> --source <PATH>`
 - `provision --usb <PATH> --source <PATH> --sync`
+- `provision --usb <PATH> --source <PATH> --in-place-rebuild`
 - `refactor --usb <PATH> --source <PATH> [--keep-staging]`
 - `resume --usb <PATH> --resume <BACKUP_DIR>`
 - `provision ... --dry-run`
 - `--json` (global)
 
-## Non-Functional Requirements
+## Requisitos No Funcionales
 - Seguridad: denegar targets no removibles/no FAT32.
 - Durabilidad: operaciones atomicas y sync explicito.
 - Observabilidad: logs + barra de progreso.
 - Mantenibilidad: docs-as-code, ADRs y contratos de modulo.
 
-## Release Build Profile
+## Perfil de Build Release
 Definido en `Cargo.toml`:
 - `opt-level = 3`
 - `lto = true`
@@ -169,11 +199,11 @@ Definido en `Cargo.toml`:
 - `panic = "abort"`
 - `strip = true`
 
-## Document Governance
+## Gobernanza Documental
 Este archivo se considera fuente de verdad de alto nivel. Cambios arquitectonicos deben enlazar al ADR correspondiente en `docs/adr/` (canonico).
 
-Checklist minimo de sincronizacion documental por cambio funcional:
+Lista minima de sincronizacion documental por cambio funcional:
 
 - ADR nuevo o supercedido (si cambia decision).
-- Actualizacion de este Tech Spec (si cambia flujo/reglas).
+- Actualizacion de esta especificacion tecnica (si cambia flujo/reglas).
 - Actualizacion de `docs/testing/*` (si cambia cobertura o pruebas).

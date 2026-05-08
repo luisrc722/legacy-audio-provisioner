@@ -26,7 +26,7 @@ Siempre es bueno hacer una ejecución en simulación primero:
 cargo build --release
 
 # Ejecutar en modo simulación
-./target/release/legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/usuario/DISCO_USB \
   --source ~/MiMusica \
@@ -40,22 +40,22 @@ cargo build --release
 === Legacy Audio Provisioner ===
 Version 0.1.0 | Spec-Driven Development
 
-=== Starting USB Provisioning ===
-[DRY RUN] No actual changes will be made
+=== Iniciando provisión USB ===
+[DRY RUN] No se realizarán cambios reales
 
-📋 Step 1: Validating USB device...
-✓ USB device validated: /media/usuario/DISCO_USB
+📋 Paso 1: Validando dispositivo USB...
+✓ Dispositivo USB validado: /media/usuario/DISCO_USB
 
-� Step 2: Scanning audio files (Secure Mode)...
-✓ Found 127 audio files
+� Paso 2: Escaneando archivos de audio (Modo Seguro)...
+✓ Se encontraron 127 archivos de audio
 
-💾 Step 3: Creating backup and validating disk space...
-[DRY RUN] Skipping backup creation
+💾 Paso 3: Creando respaldo y validando espacio en disco...
+[DRY RUN] Omitiendo creación de respaldo
 
-🧹 Step 4: Sanitizing filenames & Initializing Checkpoint...
+🧹 Paso 4: Sanitizando nombres e inicializando checkpoint...
 ✓ Planned 3 volume(s)
 
-=== Provisioning Complete ===
+=== Provisión completada ===
 ```
 
 ## Paso 3: Ejecutar en Real (Sin --dry-run)
@@ -63,7 +63,7 @@ Version 0.1.0 | Spec-Driven Development
 Una vez que el dry-run se vea bien:
 
 ```bash
-./target/release/legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/usuario/DISCO_USB \
   --source ~/MiMusica \
@@ -75,19 +75,19 @@ Una vez que el dry-run se vea bien:
 ### Caso 1: USB muy grande (> 64 GB)
 
 ```bash
-./target/release/legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/usuario/DISCO_GRANDE \
   --source ~/MiMusica \
   --verbose
 # Mensaje esperado:
-# ⚠️  Device size: 128.50 GB (requires confirmation for safety)
+# ⚠️  Tamaño del dispositivo: 128.50 GB (requiere confirmación por seguridad)
 ```
 
-### Caso 2: Debugging con logs detallados
+### Caso 2: Depuración con logs detallados
 
 ```bash
-RUST_LOG=trace ./target/release/legacy-audio-provisioner \
+RUST_LOG=trace cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/usuario/DISCO_USB \
   --source ~/MiMusica \
@@ -97,7 +97,7 @@ RUST_LOG=trace ./target/release/legacy-audio-provisioner \
 ### Caso 3: Listar dispositivos detectados
 
 ```bash
-./target/release/legacy-audio-provisioner list
+cargo run -p lap-bin-provision -- list
 ```
 
 ### Caso 4: Reanudar una provisión interrumpida
@@ -105,10 +105,10 @@ RUST_LOG=trace ./target/release/legacy-audio-provisioner \
 Si el proceso fue interrumpido (corte de luz, desconexión USB), el checkpoint atómico preservó el estado exacto. Para reanudar:
 
 ```bash
-./target/release/legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   resume \
   --usb /media/usuario/DISCO_USB \
-  --resume ~/usb_backup_20260315_1430
+  --resume ~/usb_backup_cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234
 ```
 
 El recovery compara los SHA256 reales de la USB contra el checkpoint y solo recopia los archivos faltantes o corruptos. Los archivos ya copiados correctamente **no se tocan**.
@@ -142,14 +142,36 @@ DISCO_USB/
 Antes de copiar cualquier archivo a la USB, el programa crea una copia local:
 
 ```
-~/usb_backup_20260315_1430/
+~/usb_backup_cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234/
 ├── 001_Cancin_1.mp3
 ├── 002_song.mp3
 ├── ...
 └── .provisioning_checkpoint   ← estado atómico de la sesión
 ```
 
-El directorio de backup se crea en `$HOME` por defecto. El checkpoint permite reanudar con `--resume` si ocurre una interrupción.
+El directorio de backup se crea en `$HOME` por defecto y se reutiliza por dispositivo USB. El checkpoint permite reanudar con `--resume` si ocurre una interrupción.
+
+## Reformat Seguro a FAT32 Legacy
+
+Si la USB no está en FAT32 o usa un allocation unit distinto de 32 KB, puedes usar el subcomando explícito de reformateo. El flujo hace backup completo antes de borrar la USB y exige confirmación exacta del dispositivo detectado.
+
+```bash
+cargo run -p lap-bin-provision -- \
+  format \
+  --usb /media/usuario/DISCO_USB \
+  --confirm-device /dev/sdb1 \
+  --label CABINA_A
+```
+
+Si la USB ya cumple el perfil legacy, el comando no reformatea nada y sale en modo no-op. Para forzar reformateo aunque ya cumpla:
+
+```bash
+cargo run -p lap-bin-provision -- \
+  format \
+  --usb /media/usuario/DISCO_USB \
+  --confirm-device /dev/sdb1 \
+  --force-reformat
+```
 
 ## Verificación Post-Provisioning
 
@@ -159,7 +181,7 @@ Después de provisionar, el estéreo debería:
 3. ✓ Reproducir archivos en orden numérico
 4. ✓ No tener problemas de memoria/buffer
 
-## Troubleshooting
+## Solución de Problemas
 
 ### "Device is not removable"
 
@@ -178,9 +200,11 @@ Error: Invalid filesystem: ntfs. Only FAT32 is supported.
 
 **Solución**: Formatea la USB a FAT32:
 ```bash
-# Advertencia: ESTO BORRA DATOS
-sudo mkfs.vfat -F 32 /dev/sdb1
-sudo mount /dev/sdb1 /media/usuario/DISCO_USB
+# Recomendado: usa el comando seguro del provisioner para crear backup primero
+cargo run -p lap-bin-provision -- \
+  format \
+  --usb /media/usuario/DISCO_USB \
+  --confirm-device /dev/sdb1
 ```
 
 ### "Mount point does not exist"
@@ -201,18 +225,18 @@ sudo mount /dev/sdb1 /media/usuario/DISCO_USB
 Error: Not enough disk space for backup
 ```
 
-**Solución**: Libera espacio en tu home directory:
+**Solución**: Libera espacio en tu directorio home:
 ```bash
 # Ver tamaño de backups anteriores
 du -sh ~/usb_backup*
 
 # Eliminar backups antiguos si es necesario
-rm -rf ~/usb_backup_20260101*
+rm -rf ~/usb_backup_<identidad_del_dispositivo>
 ```
 
-## Performance
+## Rendimiento
 
-### Tiempos Esperados
+### Tiempos esperados
 
 - Escaneo: ~1-2 seg (1000 archivos)
 - Sanitización: ~0.1 seg
@@ -236,7 +260,7 @@ rm -rf ~/usb_backup_20260101*
 | Archivos por carpeta | 50 máximo |
 | Longitud de nombre | 32 caracteres |
 | Tamaño de clúster FAT32 | 32 KB |
-| Particiones soportadas | MBR only |
+| Particiones soportadas | Solo MBR |
 | Encoding de nombres | ASCII/ISO-8859-1 |
 | Regex de limpieza | `[^a-zA-Z0-9\.\-\_]` |
 | Regex compilado vía | `std::sync::OnceLock` |
@@ -266,14 +290,16 @@ $ cd ~/Projects/legacy-audio-provisioner
 $ cargo build --release
 
 # 4. Dry-run
-$ ./target/release/legacy-audio-provisioner \
+$ cargo run -p lap-bin-provision -- \
+  provision \
     --usb /media/user/DISK \
     --source ~/Music \
     --dry-run \
     -v
 
 # 5. Ejecutar en real
-$ ./target/release/legacy-audio-provisioner \
+$ cargo run -p lap-bin-provision -- \
+  provision \
     --usb /media/user/DISK \
     --source ~/Music
 

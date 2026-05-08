@@ -20,6 +20,19 @@ No es un script de copia: es un FS-Manager con sincronización incremental, veri
 
 ## System Architecture
 
+Trazabilidad de arquitectura reciente:
+- `R-01-006`: EntryPoint delgada + capa de orquestacion.
+- `R-01-007`: Abstraccion de progreso desacoplada (`ProgressReporter`).
+- ADR asociado: `docs/adr/0012-thin-entrypoint-orchestrator-reporter.md`.
+
+### Estado del `src/` de raíz (retirado)
+
+- El runtime activo del proyecto vive en los crates de workspace (`crates/lap-core`, `crates/lap-bin-provision`, `crates/lap-bin-ingest`, `crates/lap-cli-tools`).
+- El código legacy del diseño monolítico fue retirado del árbol y respaldado en `backups/docs_archive_20260324_194040.tar.gz`.
+- `src/` en raíz fue eliminado y ya no existe como directorio operativo.
+- Para ejecución, pruebas y releases usa siempre binarios y comandos por crate (`cargo run -p ...`, `cargo test -p ...`).
+- Plan de retiro controlado: ver `docs/spec/requirements_traceability.md` -> "Trabajo Residual para v0.3.1".
+
 ### 1. Sync Incremental (USB como fuente de verdad)
 
 - `--sync` ejecuta diff SHA256 entre origen y USB.
@@ -81,7 +94,7 @@ Los errores de dominio viven en `ProvisioningError` y se traducen a códigos est
 - `DRM_PROTECTED`
 - `PROVISIONING_FAILED`
 
-Eventos IPC JSON (`src/ipc.rs`) disponibles para UI:
+Eventos IPC JSON (`crates/lap-core/src/ipc.rs`) disponibles para UI:
 
 - `PROGRESS`
 - `WARNING`
@@ -91,34 +104,34 @@ Eventos IPC JSON (`src/ipc.rs`) disponibles para UI:
 ## CLI Usage
 
 ```bash
-# Descubrir dispositivos válidos
-legacy-audio-provisioner list
+# Descubrir dispositivos válidos (binary de provision)
+cargo run -p lap-bin-provision -- list
 
 # Escanear audio en la primera USB detectada
-legacy-audio-provisioner scan
+cargo run -p lap-bin-provision -- scan
 
 # Simulación sin mutación
-legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/user/USB_TARGET \
   --source ~/Music \
   --dry-run
 
 # Provisión completa
-legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/user/USB_TARGET \
   --source ~/Music
 
 # Sincronización incremental
-legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   provision \
   --usb /media/user/USB_TARGET \
   --source ~/Music \
   --sync
 
 # Eventos IPC JSON
-legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   --json \
   provision \
   --usb /media/user/USB_TARGET \
@@ -126,26 +139,32 @@ legacy-audio-provisioner \
   --sync
 
 # Reanudación tras fallo
-legacy-audio-provisioner \
+cargo run -p lap-bin-provision -- \
   resume \
   --usb /media/user/USB_TARGET \
   --resume ~/usb_backup_20260315_1430
+
+# Ingesta dedicada
+cargo run -p lap-bin-ingest -- --help
+
+# Herramientas auxiliares
+cargo run -p lap-cli-tools -- --help
 ```
 
 ## Developer QA
 
 Estado actual de calidad verificado:
 
-- 41 unit tests
-- 11 integration tests
+- 55 unit tests
+- 23 integration tests
 - 2 doc tests
-- Total: 54/54 passing
+- Total: 80/80 passing
 
 Runbook QA:
 
 ```bash
 cargo test
-cargo test --test integration_test
+cargo test -p lap-core --test integration_test
 ```
 
 Cobertura relevante de Fase 2:
@@ -157,12 +176,11 @@ Cobertura relevante de Fase 2:
 
 ## Documentation
 
-- [Tech Spec](docs/tech_spec.md)
+- [Documentation Index](docs/README.md)
+- [Tech Spec](docs/spec/tech_spec.md)
+- [Requirements Traceability](docs/spec/requirements_traceability.md)
 - [Design by Contract](docs/contracts/design_by_contract.md)
 - [ADR History (Immutable, Canonical)](docs/adr/)
-- [Legacy Architecture Notes (Context)](docs/architecture/)
-- [Architectural Decisions](ARCHITECTURAL_DECISIONS.md)
-- [ADR-0006 Docs Governance](docs/adr/0006-docs-as-code-governance.md)
 - [Release Checklist](CHECKLIST.md)
 
 ## Build

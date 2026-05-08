@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Session-scoped structured logging in `lap-bin-provision` with JSON-lines output (`provisioning.log`) and per-operation records.
+- Workspace-runnable integration suite at `crates/lap-core/tests/integration_test.rs` with adversarial coverage for `R-05`:
+  - `test_11_path_traversal_is_rejected`
+  - `test_12_shell_injection_filename_is_rejected`
+  - `test_13_metadata_bomb_is_rejected`
+- Fault-injected integration coverage for `R-02` edge cases:
+  - `test_14_preflight_rw_probe_fails_fast_on_read_only_target`
+  - `test_15_checkpoint_enospc_maps_to_storage_full`
+- Integration coverage for `R-01-005` structured logging:
+  - `test_16_session_log_is_created_with_json_entries`
+- Integration coverage for recovery and final verification:
+  - `test_17_execute_recovery_restores_only_invalid_entries`
+  - `test_18_pre_eject_verification_accepts_valid_topology_and_hashes`
+
+### Changed
+- QA runbooks and release gates now reference workspace commands:
+  - `cargo test --workspace`
+  - `cargo test -p lap-core --test integration_test`
+- Integration coverage for post-write cryptographic verification:
+  - `test_19_verify_file_integrity_detects_post_write_corruption`
+- Baseline test count updated to `75/75` (53 unit + 20 integration + 2 doc).
+
 ## [1.1.0] - 2026-03-16
 
 ### Fixed
@@ -22,7 +47,7 @@ All notable changes to this project are documented in this file.
 - Established canonical Docs-as-Code governance via ADR-0006 (`docs/adr/0006-docs-as-code-governance.md`).
 - Updated core documentation with visual Mermaid flows:
   - Release gates in `CHECKLIST.md`
-  - Provision/recovery pipeline in `docs/tech_spec.md`
+  - Provision/recovery pipeline in `docs/spec/tech_spec.md`
   - Integration traceability in `docs/testing/integration_tests.md`
 - Clarified source-of-truth boundaries:
   - Canonical ADRs in `docs/adr/`
