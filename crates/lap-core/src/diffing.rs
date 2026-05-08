@@ -605,6 +605,106 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_sync_diff_idempotent_when_everything_exists() -> Result<()> {
+        let source = TempDir::new()?;
+        let usb = TempDir::new()?;
+
+        fs::create_dir_all(usb.path().join("VOL_01"))?;
+
+        let src_a = source.path().join("a.mp3");
+        let src_b = source.path().join("b.mp3");
+        fs::write(&src_a, b"same-a")?;
+        fs::write(&src_b, b"same-b")?;
+
+        fs::write(usb.path().join("VOL_01/001_a.mp3"), b"same-a")?;
+        fs::write(usb.path().join("VOL_01/002_b.mp3"), b"same-b")?;
+
+        let source_files = discover_audio_files(source.path())?.audio_files;
+        let report = calculate_sync_diff(&source_files, usb.path(), &HashSet::new())?;
+
+        assert_eq!(report.files_to_process.len(), 0);
+        assert_eq!(report.skipped_existing, 2);
+        assert_eq!(report.max_existing_index, 2);
+        assert!(report.untracked_in_target.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_calculate_sync_diff_mixed_existing_displaced_and_new() -> Result<()> {
+        let source = TempDir::new()?;
+        let usb = TempDir::new()?;
+
+        fs::create_dir_all(usb.path().join("VOL_01"))?;
+        fs::create_dir_all(usb.path().join("misc"))?;
+
+        let src_existing = source.path().join("existing.mp3");
+        let src_displaced = source.path().join("displaced.mp3");
+        let src_new = source.path().join("new.mp3");
+
+        fs::write(&src_existing, b"content-existing")?;
+        fs::write(&src_displaced, b"content-displaced")?;
+        fs::write(&src_new, b"content-new")?;
+
+        fs::write(usb.path().join("VOL_01/007_existing.mp3"), b"content-existing")?;
+        fs::write(
+            usb.path().join("misc/displaced_original.mp3"),
+            b"content-displaced",
+        )?;
+
+        let source_files = discover_audio_files(source.path())?.audio_files;
+        let report = calculate_sync_diff(&source_files, usb.path(), &HashSet::new())?;
+
+        assert_eq!(report.skipped_existing, 1);
+        assert_eq!(report.files_to_process.len(), 2);
+        assert_eq!(report.displaced_in_target.len(), 1);
+        assert!(report.displaced_in_target.contains_key(&src_displaced));
+        assert_eq!(report.max_existing_index, 7);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_calculate_sync_diff_marks_unknown_checkpoint_names_as_untracked() -> Result<()> {
+        let source = TempDir::new()?;
+        let usb = TempDir::new()?;
+
+        fs::create_dir_all(usb.path().join("VOL_01"))?;
+
+        let src = source.path().join("incoming.mp3");
+        fs::write(&src, b"incoming-data")?;
+        fs::write(usb.path().join("VOL_01/001_known.mp3"), b"known-data")?;
+        fs::write(usb.path().join("VOL_01/002_orphan.mp3"), b"orphan-data")?;
+
+        let mut known_names = HashSet::new();
+        known_names.insert("001_known.mp3".to_string());
+
+        let source_files = discover_audio_files(source.path())?.audio_files;
+        let report = calculate_sync_diff(&source_files, usb.path(), &known_names)?;
+
+        assert_eq!(report.files_to_process.len(), 1);
+        assert_eq!(report.skipped_existing, 0);
+        assert_eq!(report.untracked_in_target.len(), 1);
+        assert!(report.untracked_in_target[0].ends_with("VOL_01/002_orphan.mp3"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_plan_incremental_distribution_starts_at_volume_one_when_no_existing() {
+        let mappings = vec![
+            (PathBuf::from("a.mp3"), "001_a.mp3".to_string()),
+            (PathBuf::from("b.mp3"), "002_b.mp3".to_string()),
+        ];
+
+        let planned = plan_incremental_distribution(mappings, &BTreeMap::new());
+
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].folder_name, "VOL_01");
+        assert_eq!(planned[0].files.len(), 2);
+    }
+
+    #[test]
     fn test_quarantine_untracked_files_backup_first() -> Result<()> {
         let source = TempDir::new()?;
         let usb = TempDir::new()?;
