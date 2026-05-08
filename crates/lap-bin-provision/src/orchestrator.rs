@@ -735,7 +735,7 @@ impl ProvisioningOrchestrator {
                 self.reporter
                     .info("Step 3.0: Topology sandbox (quarantine universal de raiz, backup-first)...");
 
-                let session_label = format!("topology_{}", Local::now().format("%Y%m%d_%H%M%S"));
+                let session_label = format!("topology_{}", stable_backup_key);
                 let topology_report = diffing::quarantine_non_whitelisted_root_entries(
                     usb_mount,
                     &root_sandbox_candidates,
@@ -778,7 +778,7 @@ impl ProvisioningOrchestrator {
             if sync_mode && !untracked_in_target.is_empty() {
                 self.reporter
                     .info("Step 3.1: Aislando huérfanos en .legacy_quarantine (backup-first)...");
-                let session_label = format!("sync_{}", Local::now().format("%Y%m%d_%H%M%S"));
+                let session_label = format!("sync_{}", stable_backup_key);
                 let quarantine_report = diffing::quarantine_untracked_files(
                     usb_mount,
                     &untracked_in_target,
