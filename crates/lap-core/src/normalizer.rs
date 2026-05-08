@@ -58,7 +58,7 @@ pub enum ProcessingDecision {
 fn classify_from_profile(profile: &AudioProfile) -> ProcessingDecision {
     let is_safe_mp3 = profile.codec == "mp3"
         && profile.sample_rate == 44100
-        && (profile.bitrate >= 120_000 && profile.bitrate <= 195_000);
+        && (profile.bitrate >= 120_000 && profile.bitrate <= 320_000);
 
     let needs_cleanup =
         profile.has_embedded_cover || profile.has_video_stream || profile.has_metadata_tags;
@@ -321,7 +321,9 @@ pub fn normalize_audio(input: &Path, output: &Path, decision: ProcessingDecision
                 .arg("-b:a")
                 .arg("128k")
                 .arg("-ar")
-                .arg("44100");
+                .arg("44100")
+                .arg("-ac")
+                .arg("2"); // Forzar stereo para compatibilidad con firmware legacy
         }
         ProcessingDecision::FastInPlaceRename => unreachable!(),
     }
