@@ -10,6 +10,7 @@ use legacy_audio_provisioner::hardware;
 use legacy_audio_provisioner::ipc::IpcEvent;
 use legacy_audio_provisioner::normalizer;
 use legacy_audio_provisioner::sanitizer;
+use legacy_audio_provisioner::security;
 use legacy_audio_provisioner::verification;
 
 use chrono::Utc;
@@ -311,5 +312,33 @@ fn test_10_hardware_fraud_detected_after_five_hash_mismatches() -> anyhow::Resul
     let typed = err.downcast_ref::<ProvisioningError>();
 
     assert!(matches!(typed, Some(ProvisioningError::HardwareFraudDetected { .. })));
+    Ok(())
+}
+
+#[test]
+fn test_11_path_traversal_is_rejected() -> anyhow::Result<()> {
+    let base = TempDir::new()?;
+    let result = security::validate_path_containment(base.path(), Path::new("../escape.mp3"));
+
+    assert!(result.is_err());
+    Ok(())
+}
+
+#[test]
+fn test_12_shell_injection_filename_is_rejected() {
+    let result = security::validate_shell_safe_filename("track.mp3; rm -rf /");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_13_metadata_bomb_is_rejected() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let big_file = temp.path().join("oversized_tag.mp3");
+    let payload = vec![0x41_u8; (security::MAX_ID3_TAG_SIZE + 1) as usize];
+    fs::write(&big_file, payload)?;
+
+    let result = security::validate_metadata_bomb_safety(&big_file, security::MAX_ID3_TAG_SIZE);
+    assert!(result.is_err());
+
     Ok(())
 }
