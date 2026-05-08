@@ -7,6 +7,7 @@
 
 use crate::checkpoint::{CheckpointData, CheckpointManager, OperationStatus};
 use crate::crypto::compute_file_sha256;
+use crate::distribution::MAX_FILES_PER_FOLDER;
 use crate::normalizer;
 use crate::security::validate_path_containment;
 use anyhow::{anyhow, Context, Result};
@@ -40,7 +41,7 @@ impl RecoveryManager {
     }
 
     fn target_path_for(index: usize, normalized_name: &str, usb_mount: &Path) -> Result<PathBuf> {
-        let volume_index = (index / 50) + 1;
+        let volume_index = (index / MAX_FILES_PER_FOLDER) + 1;
         let volume_folder = format!("VOL_{:02}", volume_index);
 
         let vol_path = validate_path_containment(usb_mount, Path::new(&volume_folder))?;
