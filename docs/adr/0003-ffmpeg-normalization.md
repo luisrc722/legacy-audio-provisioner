@@ -1,22 +1,22 @@
 # ADR 0003: FFmpeg Normalization for Legacy Compatibility
 
-- Status: Accepted
-- Date: 2026-03-16
-- Author: Luis / Legacy Audio Project
+- Estado: Aceptado
+- Fecha: 2026-03-16
+- Autor: Luis / Legacy Audio Project
 
-## 1. Context
+## 1. Contexto
 
-Legacy car stereos fail with inconsistent codecs, unsupported metadata, VBR edge cases, and container complexity.
+Los estéreos legacy fallan con códecs inconsistentes, metadatos no soportados, casos borde de VBR y complejidad de contenedor.
 
-## 2. Decision
+## 2. Decisión
 
-Normalize output through FFmpeg/ffprobe to produce deterministic, legacy-compatible MP3 output and stripped metadata.
+Normalizar la salida mediante FFmpeg/ffprobe para producir MP3 determinístico, compatible con dispositivos legacy y sin metadatos.
 
-## 3. Consequences
+## 3. Consecuencias
 
-- Positive:
-  - Stable playback on constrained legacy firmware.
-  - Reduced variability between source catalogs.
-- Negative:
-  - Dependency on FFmpeg toolchain.
-  - Additional CPU and I/O during normalization.
+- Positivas:
+  - Reproducción estable en firmware legacy con recursos limitados.
+  - Menor variabilidad entre catálogos de origen.
+- Negativas:
+  - Dependencia de la herramienta FFmpeg.
+  - CPU e I/O adicionales durante la normalización.

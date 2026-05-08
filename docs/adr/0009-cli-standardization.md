@@ -1,6 +1,6 @@
 # ADR 0009: CLI Standardization and Command Orchestration
 
-- Status: Accepted
+- Estado: Aceptado
 - Date: 2026-03-16
 - Author: Luis / Legacy Audio Project
 

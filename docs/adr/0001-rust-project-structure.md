@@ -1,21 +1,21 @@
 # ADR 0001: Rust Project Structure
 
-- Status: Accepted
-- Date: 2026-03-16
-- Author: Luis / Legacy Audio Project
+- Estado: Aceptado
+- Fecha: 2026-03-16
+- Autor: Luis / Legacy Audio Project
 
-## 1. Context
+## 1. Contexto
 
-The project needs a maintainable structure for long-term evolution, testing, and safety hardening.
+El proyecto necesita una estructura mantenible para evolución a largo plazo, pruebas y endurecimiento de seguridad.
 
-## 2. Decision
+## 2. Decisión
 
-Adopt a modular Rust architecture where orchestration remains in `src/main.rs` and domain logic is implemented in focused modules (`backup`, `checkpoint`, `diffing`, `distribution`, `hardware`, `normalizer`, `recovery`, `sanitizer`, `verification`, `ipc`).
+Adoptar una arquitectura modular en Rust donde la orquestación permanezca en `src/main.rs` y la lógica de dominio se implemente en módulos enfocados (`backup`, `checkpoint`, `diffing`, `distribution`, `hardware`, `normalizer`, `recovery`, `sanitizer`, `verification`, `ipc`).
 
-## 3. Consequences
+## 3. Consecuencias
 
-- Positive:
-  - Better isolation of responsibilities and easier testing.
-  - Safer incremental hardening without monolithic rewrites.
-- Negative:
-  - More files and interfaces to keep aligned.
+- Positivas:
+  - Mejor aislamiento de responsabilidades y pruebas más sencillas.
+  - Endurecimiento incremental más seguro sin reescrituras monolíticas.
+- Negativas:
+  - Más archivos e interfaces que mantener alineados.

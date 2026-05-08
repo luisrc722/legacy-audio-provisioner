@@ -1,23 +1,23 @@
 # ADR 0004: Backup-First Quarantine for Untracked USB Files
 
-- Status: Accepted
-- Date: 2026-03-16
-- Author: Luis / Legacy Audio Project
+- Estado: Aceptado
+- Fecha: 2026-03-16
+- Autor: Luis / Legacy Audio Project
 
-## 1. Context
+## 1. Contexto
 
-USB targets may contain untracked customer files not represented in the checkpoint. Deleting unknown files is contract-risky.
+Los destinos USB pueden contener archivos del cliente no rastreados y no representados en el checkpoint. Eliminar archivos desconocidos implica riesgo contractual.
 
-## 2. Decision
+## 2. Decisión
 
-Before any mutation, backup untracked files to host and then move them to `.legacy_quarantine/<session>/` on USB.
+Antes de cualquier mutación, respaldar los archivos no rastreados en el host y luego moverlos a `.legacy_quarantine/<session>/` en la USB.
 
-## 3. Consequences
+## 3. Consecuencias
 
-- Positive:
-  - Data-loss risk is minimized.
-  - USB root is cleaned for deterministic legacy playback.
-  - Audit trail is preserved.
-- Negative:
-  - Temporary storage overhead on host/USB.
-  - Slightly longer execution time.
+- Positivas:
+  - Se minimiza el riesgo de pérdida de datos.
+  - Se limpia la raíz de la USB para reproducción legacy determinística.
+  - Se preserva la trazabilidad de auditoría.
+- Negativas:
+  - Sobrecarga temporal de almacenamiento en host/USB.
+  - Tiempo de ejecución ligeramente mayor.

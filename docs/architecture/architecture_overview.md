@@ -4,17 +4,19 @@
 
 Legacy Audio Provisioner implementa un pipeline transaccional para preparar USBs compatibles con firmware legacy (FAT32, limites de nombres y jerarquia, recovery por checksum).
 
+El binario operativo principal sigue una arquitectura de entrypoint delgado: la CLI inicializa runtime/logging y delega el flujo de negocio en una capa de orquestacion dedicada.
+
 Flujo principal:
 
 ```text
-Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -> Finalize -> Safe Eject
+Validar HW -> Descubrir -> Backup -> Sanitizar/Planificar -> Normalizar+Copia -> Verificar -> Finalizar -> Expulsión Segura
 ```
 
 ## Etapas del Pipeline
 
 ### 1. Validacion de hardware
 
-**Modulo:** `src/hardware.rs`
+**Modulo:** `crates/lap-core/src/hardware.rs`
 
 - Valida mountpoint real contra `/proc/mounts`.
 - Permite solo dispositivos de bloque removibles (`/sys/block/*/removable`).
@@ -22,7 +24,7 @@ Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -
 
 ### 2. Discovery de audio
 
-**Modulo:** `src/audio_discovery.rs`
+**Modulo:** `crates/lap-core/src/audio_discovery.rs`
 
 - Escaneo recursivo con `walkdir`.
 - Filtrado temprano de entradas ocultas/sistema (`.*`, `System Volume Information`, `$RECYCLE.BIN`, `FOUND.*`).
@@ -30,7 +32,7 @@ Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -
 
 ### 3. Backup y verificacion de cuota
 
-**Modulo:** `src/backup.rs`
+**Modulo:** `crates/lap-core/src/backup.rs`
 
 - Crea backup local timestamped.
 - Copia con hashing SHA256 en streaming.
@@ -38,23 +40,25 @@ Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -
 
 ### 4. Sanitizacion y planificacion
 
-**Modulos:** `src/sanitizer.rs`, `src/distribution.rs`
+**Modulos:** `crates/lap-core/src/sanitizer.rs`, `crates/lap-core/src/distribution.rs`
 
 - Sanitiza nombres y aplica prefijo secuencial.
 - `distribution` es planner puro (sin I/O fisica).
 - Segmenta en `VOL_XX` con maximo 50 archivos por volumen.
 
-### 5. Escritura fisica y normalizacion
+### 5. Orquestacion, progreso y escritura fisica
 
-**Modulos:** `src/main.rs`, `src/normalizer.rs`
+**Modulos:** `crates/lap-bin-provision/src/main.rs`, `crates/lap-bin-provision/src/orchestrator.rs`, `crates/lap-bin-provision/src/reporter.rs`, `crates/lap-core/src/normalizer.rs`
 
-- La copia fisica se ejecuta en el orquestador (`main.rs`).
+- `main.rs` actua como entrypoint delgado (parseo + bootstrap + dispatch).
+- La capa `orchestrator.rs` concentra el flujo de provision/refactor/resume.
+- `reporter.rs` abstrae progreso/feedback con `ProgressReporter` (CLI e IPC JSON).
 - Cada archivo pasa por `normalizer::normalize_audio(...)` antes de escribir en USB.
 - Se actualiza checkpoint por archivo (`InProgress`/`Completed`/`Failed`).
 
 ### 6. Checkpoint atomico y recovery
 
-**Modulos:** `src/checkpoint.rs`, `src/recovery.rs`
+**Modulos:** `crates/lap-core/src/checkpoint.rs`, `crates/lap-core/src/recovery.rs`
 
 - Estado persistido en `.provisioning_checkpoint` con `BTreeMap<usize, FileCheckpoint>`.
 - Escritura atomica: `tmp -> sync_all -> rename`.
@@ -62,7 +66,7 @@ Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -
 
 ### 7. Verificacion final y expulsion segura
 
-**Modulo:** `src/verification.rs`
+**Modulo:** `crates/lap-core/src/verification.rs`
 
 - Verifica topologia (`VOL_XX`, maximo 50 archivos, nombres validos).
 - Verifica integridad contra hashes del checkpoint.
@@ -71,18 +75,28 @@ Validate HW -> Discover -> Backup -> Sanitize/Plan -> Normalize+Copy -> Verify -
 ## Mapa de Modulos
 
 ```text
-src/
-├── lib.rs
-├── main.rs
-├── hardware.rs
-├── audio_discovery.rs
-├── backup.rs
-├── sanitizer.rs
-├── distribution.rs
-├── normalizer.rs
-├── checkpoint.rs
-├── recovery.rs
-└── verification.rs
+crates/
+├── lap-core/
+│   └── src/
+│       ├── audio_discovery.rs
+│       ├── backup.rs
+│       ├── checkpoint.rs
+│       ├── crypto.rs
+│       ├── diffing.rs
+│       ├── distribution.rs
+│       ├── hardware.rs
+│       ├── ingestion.rs
+│       ├── journal.rs
+│       ├── normalizer.rs
+│       ├── recovery.rs
+│       ├── sanitizer.rs
+│       ├── security.rs
+│       └── verification.rs
+└── lap-bin-provision/
+	└── src/
+		├── main.rs
+		├── orchestrator.rs
+		└── reporter.rs
 ```
 
 ## Invariantes Operacionales

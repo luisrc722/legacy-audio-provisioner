@@ -1,23 +1,23 @@
 # ADR 0002: Direct File Copy Baseline
 
-- Status: Superseded by ADR-0005
-- Date: 2026-03-16
-- Author: Luis / Legacy Audio Project
+- Estado: Sustituido por ADR-0005
+- Fecha: 2026-03-16
+- Autor: Luis / Legacy Audio Project
 
-## 1. Context
+## 1. Contexto
 
-The initial implementation prioritized delivery speed and started from direct host-to-USB copy semantics.
+La implementación inicial priorizó la velocidad de entrega y partió de una semántica de copia directa host-a-USB.
 
-## 2. Decision
+## 2. Decisión
 
-Use straightforward copy behavior as an early baseline while the hardening strategy was still being discovered.
+Usar un comportamiento de copia simple como línea base temprana mientras la estrategia de endurecimiento aún se definía.
 
-## 3. Consequences
+## 3. Consecuencias
 
-- Positive:
-  - Fast initial delivery.
-  - Simple execution path.
-- Negative:
-  - No cryptographic identity for dedup/incremental sync.
-  - Full reprocessing overhead on every run.
-  - Weak integrity guarantees for large catalogs.
+- Positivas:
+  - Entrega inicial rápida.
+  - Ruta de ejecución simple.
+- Negativas:
+  - Sin identidad criptográfica para deduplicación/sincronización incremental.
+  - Sobrecarga por reprocesamiento completo en cada ejecución.
+  - Garantías de integridad débiles para catálogos grandes.

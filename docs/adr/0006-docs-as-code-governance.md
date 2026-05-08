@@ -1,14 +1,14 @@
 # ADR 0006: Docs-as-Code Governance and Canonical Sources
 
-- Status: Accepted
+- Estado: Aceptado
 - Date: 2026-03-16
 - Author: Luis / Legacy Audio Project
 
-## 1. Context
+## 1. Contexto
 
 The project grew from a single README into multiple technical modules (sync, quarantine, typed errors, checkpoint recovery). Without explicit governance, documentation drift appears quickly and causes operational mistakes.
 
-## 2. Decision
+## 2. Decisión
 
 Adopt an explicit Docs-as-Code governance model with canonical sources:
 
@@ -18,7 +18,7 @@ Adopt an explicit Docs-as-Code governance model with canonical sources:
 4. `docs/architecture/` and `docs/archive/` are legacy/historical context, not normative.
 5. Any functional code change must include corresponding doc updates in the same commit series.
 
-## 3. Consequences
+## 3. Consecuencias
 
 - Positive:
   - Clear source hierarchy reduces ambiguity during audits and reviews.
