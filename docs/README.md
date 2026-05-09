@@ -52,6 +52,7 @@ Politica de rutas de codigo:
 
 - `docs/testing/integration_tests.md`
 - `docs/testing/pbt_and_e2e_test_plan.md`
+- `docs/testing/objective_audit_rubric.md`
 
 ### Guias
 
