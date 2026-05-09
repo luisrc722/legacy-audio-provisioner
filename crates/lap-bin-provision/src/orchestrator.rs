@@ -14,6 +14,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::messages::tr;
 use crate::reporter::ProgressReporter;
 
 /// [R-01-006] EntryPoint Delgada
@@ -34,42 +35,66 @@ impl ProvisioningOrchestrator {
     }
 
     pub fn list_usb_devices(&mut self) -> Result<()> {
-        self.reporter.info("\n=== Detecting USB Devices ===\n");
+        self.reporter
+            .info(&format!("\n{}\n", tr("=== Detectando Dispositivos USB ===", "=== Detecting USB Devices ===")));
         let devices = hardware::detect_usb_devices()?;
         if devices.is_empty() {
-            self.reporter.info("No USB/removable devices detected.");
+            self.reporter
+                .info(tr("No se detectaron dispositivos USB/removibles.", "No USB/removable devices detected."));
             return Ok(());
         }
-        self.reporter
-            .info(&format!("Found {} USB device(s):\n", devices.len()));
+        self.reporter.info(&format!(
+            "{} {}:\n",
+            tr("Se detectaron", "Found"),
+            devices.len()
+        ));
         for (idx, device) in devices.iter().enumerate() {
             self.reporter
-                .info(&format!("  [{}] Device: {}", idx + 1, device.device_path.display()));
+                .info(&format!(
+                    "  [{}] {}: {}",
+                    idx + 1,
+                    tr("Dispositivo", "Device"),
+                    device.device_path.display()
+                ));
             self.reporter
-                .info(&format!("      Mount point: {}", device.mount_point.display()));
+                .info(&format!(
+                    "      {}: {}",
+                    tr("Punto de montaje", "Mount point"),
+                    device.mount_point.display()
+                ));
             self.reporter
-                .info(&format!("      Filesystem: {}", device.fs_type));
+                .info(&format!("      {}: {}", tr("Sistema de archivos", "Filesystem"), device.fs_type));
             if let Some(allocation_unit_bytes) = device.allocation_unit_bytes {
                 self.reporter.info(&format!(
-                    "      Allocation unit: {} KB{}",
+                    "      {}: {} KB{}",
+                    tr("Unidad de asignacion", "Allocation unit"),
                     allocation_unit_bytes / 1024,
                     if allocation_unit_bytes
                         == hardware::LEGACY_FAT32_ALLOCATION_UNIT_BYTES
                     {
-                        " (legacy cache OK)"
+                        tr(" (cache legacy OK)", " (legacy cache OK)")
                     } else {
-                        " (reformat recommended)"
+                        tr(" (reformateo recomendado)", " (reformat recommended)")
                     }
                 ));
             } else {
                 self.reporter
-                    .info("      Allocation unit: unknown (best-effort verification)");
+                    .info(&format!(
+                        "      {}: {}",
+                        tr("Unidad de asignacion", "Allocation unit"),
+                        tr("desconocida (verificacion best-effort)", "unknown (best-effort verification)")
+                    ));
             }
             self.reporter
-                .info(&format!("      Size: {:.2} GB", device.size_gb()));
+                .info(&format!("      {}: {:.2} GB", tr("Tamano", "Size"), device.size_gb()));
             self.reporter.info(&format!(
-                "      Removable: {}",
-                if device.is_removable { "Yes" } else { "No" }
+                "      {}: {}",
+                tr("Extraible", "Removable"),
+                if device.is_removable {
+                    tr("Si", "Yes")
+                } else {
+                    tr("No", "No")
+                }
             ));
             self.reporter.info("");
         }
@@ -138,14 +163,22 @@ impl ProvisioningOrchestrator {
         let needs_reformat = device.requires_legacy_reformat();
         if !needs_reformat && !force_reformat {
             self.reporter.info(&format!(
-                "La USB '{}' ya cumple el perfil legacy; se omite el formateo.",
+                "{} '{}'.",
+                tr(
+                    "La USB ya cumple el perfil legacy; se omite el formateo",
+                    "USB already meets legacy profile; formatting is skipped"
+                ),
                 usb_mount.display()
             ));
             IpcEvent::Success {
                 total_processed: 0,
                 total_skipped: 0,
                 elapsed_time_seconds: 0,
-                message: "Formateo omitido: el volumen ya cumple el perfil legacy.".to_string(),
+                message: tr(
+                    "Formateo omitido: el volumen ya cumple el perfil legacy.",
+                    "Format skipped: volume already meets legacy profile."
+                )
+                .to_string(),
             }
             .emit(self.json_mode);
             return Ok(());
