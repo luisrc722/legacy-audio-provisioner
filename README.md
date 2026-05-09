@@ -1,194 +1,318 @@
 # Legacy Audio Provisioner (LAP)
 
-Motor de gestión de archivos para USB legacy (estéreos ~2005), escrito en Rust.
-No es un script de copia: es un FS-Manager con sincronización incremental, verificación criptográfica y hardening de hardware.
+Motor de provisión para USB legacy (estéreos antiguos), con enfoque en seguridad operativa:
+
+1. Backup-first obligatorio antes de mutaciones.
+2. Estado operativo en host segregado por dispositivo.
+3. Verificación por hash y recuperación transaccional.
+
+No es un script de copia simple: es un pipeline con validaciones de hardware, cuarentena de contenido no gestionado, checkpoint, normalización y verificación final.
 
 [![Rust: 1.70+](https://img.shields.io/badge/Rust-1.70%2B-blue.svg)](https://www.rust-lang.org/)
 [![Architecture: Zero-Trust](https://img.shields.io/badge/Architecture-Zero--Trust-red.svg)]()
-[![State: Production Ready](https://img.shields.io/badge/State-Production_Ready-success.svg)]()
+[![State: Active](https://img.shields.io/badge/State-Active-success.svg)]()
 
-## Hardware Spec
+## Tabla De Contenido
 
-| Constraint | Regla aplicada por LAP |
+1. [Qué Hace LAP](#qué-hace-lap)
+2. [Arquitectura Por Crates](#arquitectura-por-crates)
+3. [Flujos De Ejecución](#flujos-de-ejecución)
+4. [Artefactos Que Se Crean](#artefactos-que-se-crean)
+5. [Comandos](#comandos)
+6. [Runbook Recomendado](#runbook-recomendado)
+7. [Modelo De Seguridad Operativa](#modelo-de-seguridad-operativa)
+8. [Solución De Problemas](#solución-de-problemas)
+9. [Desarrollo Y QA](#desarrollo-y-qa)
+
+## Qué Hace LAP
+
+Objetivo principal: preparar una USB para firmware legacy de audio bajo restricciones duras.
+
+| Restricción de hardware | Regla aplicada por LAP |
 | --- | --- |
 | Filesystem | Solo `vfat`/FAT32 |
-| Removible | Validación contra `/sys/block/*/removable` |
-| Topología | `ROOT -> VOL_XX -> archivo` (máx 2 niveles) |
-| Capacidad por carpeta | Máx 50 archivos |
-| Nombre de archivo | ASCII, máx 32 caracteres |
-| Audio destino | MP3 CBR 128-192kbps |
+| Medio removible | Validación con `/sys/block/*/removable` |
+| Topología de salida | `ROOT -> VOL_XX -> archivo` |
+| Máximo por carpeta | 50 archivos |
+| Nombre final | ASCII, `<= 32` bytes |
+| Audio destino | MP3 compatible (según clasificador/normalizador) |
 
-## System Architecture
+## Arquitectura Por Crates
 
-Trazabilidad de arquitectura reciente:
-- `R-01-006`: EntryPoint delgada + capa de orquestacion.
-- `R-01-007`: Abstraccion de progreso desacoplada (`ProgressReporter`).
-- ADR asociado: `docs/adr/0012-thin-entrypoint-orchestrator-reporter.md`.
+Workspace actual:
 
-### Estado del `src/` de raíz (retirado)
+1. `crates/lap-core`
+- Núcleo de dominio.
+- Módulos clave: backup, checkpoint, diffing, normalizer, sanitizer, verification, state, manifest, journal.
 
-- El runtime activo del proyecto vive en los crates de workspace (`crates/lap-core`, `crates/lap-bin-provision`, `crates/lap-bin-ingest`, `crates/lap-cli-tools`).
-- El código legacy del diseño monolítico fue retirado del árbol y respaldado en `backups/docs_archive_20260324_194040.tar.gz`.
-- `src/` en raíz fue eliminado y ya no existe como directorio operativo.
-- Para ejecución, pruebas y releases usa siempre binarios y comandos por crate (`cargo run -p ...`, `cargo test -p ...`).
-- Plan de retiro controlado: ver `docs/spec/requirements_traceability.md` -> "Trabajo Residual para v0.3.1".
+2. `crates/lap-bin-provision`
+- CLI principal de operación (`list`, `scan`, `provision`, `format`, `resume`, `ingest`, `refactor`).
+- Entry point delgado + orquestador.
 
-### 1. Sync Incremental (USB como fuente de verdad)
+3. `crates/lap-bin-ingest`
+- Flujo de ingesta local/staging.
 
-- `--sync` ejecuta diff SHA256 entre origen y USB.
-- El checkpoint `.provisioning_checkpoint` también se espeja en la raíz de la USB.
-- Se mantiene continuidad global de índices `N+1` y relleno de `VOL_XX` sin colisiones.
+4. `crates/lap-cli-tools`
+- Herramientas auxiliares.
+
+## Flujos De Ejecución
+
+### 1) Provision estándar
 
 ```mermaid
 flowchart TD
-    A[Scan Source] --> B[Load USB checkpoint]
-    B --> C[Hash Diff Source vs USB]
-    C --> D{Archivo ya existe por hash}
-    D -- Si --> E[Skip]
-    D -- No --> F[Assign index N+1]
-    F --> G[Fill current VOL_XX up to 50]
-    G --> H[Normalize + Copy]
-    H --> I[Checkpoint update + mirror to USB]
+    A[Validar USB + lock + RW] --> B[Descubrir audio origen]
+    B --> C{sync?}
+    C -- si --> D[Diff SHA256 + estado host]
+    C -- no --> E[Usar lista completa de origen]
+    D --> F[Backup-first]
+    E --> F
+    F --> G[Quarantine backup-first de untracked]
+    G --> H[Sanitizar + naming compacto + plan VOL_XX]
+    H --> I[Procesar archivo: move/copy/transcode]
+    I --> J[Checkpoint host por volumen]
+    J --> K[Manifest host por volumen]
+    K --> L[Verificacion final]
+    L --> M[Safe eject]
 ```
 
-### 2. Seguridad de hardware y transaccionalidad
+### 2) In-place rebuild
 
-- Exclusión mutua por lock físico `.lap_provisioning.lock` (PID-based, orphan tolerant).
-- Dirty-bit test (`assert_rw_filesystem`) antes de procesar para detectar `EROFS`/solo lectura.
-- Detección de fraude NAND: aborto con `HARDWARE_FRAUD_DETECTED` tras 5 mismatches SHA256 consecutivos.
-- Checkpoint atómico POSIX: `.tmp -> sync_all() -> rename()` + `dir sync`.
+```mermaid
+flowchart TD
+    A[Validar USB + lock + RW] --> B[Construir plan in-place]
+    B --> C[Backup-first snapshot en host]
+    C --> D[Checkpoint host: reanudar si aplica]
+    D --> E[Mover temporal + rename/transcode condicional]
+    E --> F[Persistir checkpoint por volumen]
+    F --> G[Verificacion final]
+    G --> H[Finalize + safe eject]
+```
 
-### 3. Normalización y sanitización estricta
+### 3) Principio operativo clave
 
-- `normalizer.rs`:
-  - passthrough seguro para MP3 CBR compatible,
-  - transcodificación forzada a MP3 CBR 128k si no cumple,
-  - limpieza agresiva (`-map 0:a:0`, `-map_metadata -1`) para evitar bloqueos por carátulas/tags.
-- `sanitizer.rs`:
-  - ASCII-only,
-  - límite 32 chars,
-  - preservación de extensión `.mp3` con truncamiento del stem (no rompe extensión).
+El pipeline aplica el orden:
 
-### 4. Gestión de integridad por cuarentena
+1. Backup primero.
+2. Reestructuración/normalización después.
+3. Acomodo final en USB al final.
 
-- Archivos `untracked` en USB no se borran por defecto.
-- Flujo `backup-first`: primero copia a Host, luego aislamiento en `.legacy_quarantine/<session>/`.
-- Resultado: USB limpia para el estéreo, sin riesgo de pérdida de datos del cliente.
+## Artefactos Que Se Crean
 
-## Safety First
+### En host (estado operativo)
 
-LAP aplica protección multicapa para minimizar riesgo operativo:
+Por defecto se usa `~/.lap` (o `LAP_STATE_DIR` si está definido).
 
-1. Origen en host tratado como solo lectura.
-2. Backup local en Host con verificación SHA256.
-3. Aislamiento de huérfanos en `.legacy_quarantine/` en USB (no destructivo).
+| Tipo | Ubicación |
+| --- | --- |
+| Backups | `~/.lap/backups/usb_backup_<device_key>/` |
+| Checkpoint | `~/.lap/checkpoints/<device_key>/.provisioning_checkpoint` |
+| Manifest dedupe | `~/.lap/manifests/manifest_<device_key>.json` |
+| Journal transaccional | `~/.lap/journals/journal_<device_key>.json` |
+| Logs de sesión | `~/.lap/logs/<session_id>/provisioning.log` |
 
-## Typed Errors + IPC
+### En USB
 
-Los errores de dominio viven en `ProvisioningError` y se traducen a códigos estables para frontend/operación:
+| Tipo | Ubicación |
+| --- | --- |
+| Lock operativo | `.lap_provisioning.lock` |
+| Cuarentena | `.legacy_quarantine/<session>/` |
+| Topología final | `VOL_01`, `VOL_02`, ... |
 
-- `CONCURRENCY_ERROR`
-- `FILESYSTEM_READ_ONLY`
-- `ENOSPC_ERROR`
-- `HARDWARE_FRAUD_DETECTED`
-- `DRM_PROTECTED`
-- `PROVISIONING_FAILED`
+Nota importante:
 
-Eventos IPC JSON (`crates/lap-core/src/ipc.rs`) disponibles para UI:
+1. El manifest operativo ya no se guarda en USB.
+2. El checkpoint operativo ya no se espeja a USB.
+3. El journal operativo ya no se guarda en USB.
 
-- `PROGRESS`
-- `WARNING`
-- `FATAL_ERROR`
-- `SUCCESS`
+## Comandos
 
-## CLI Usage
+### Build
 
 ```bash
-# Descubrir dispositivos válidos (binary de provision)
+cargo build --workspace
+cargo build --workspace --release
+```
+
+### Listar dispositivos
+
+```bash
 cargo run -p lap-bin-provision -- list
+```
 
-# Escanear audio en la primera USB detectada
-cargo run -p lap-bin-provision -- scan
+### Escanear audio en USB
 
-# Simulación sin mutación
+```bash
+cargo run -p lap-bin-provision -- scan --usb /media/usuario/USB
+```
+
+### Dry-run seguro
+
+```bash
 cargo run -p lap-bin-provision -- \
   provision \
-  --usb /media/user/USB_TARGET \
-  --source ~/Music \
+  --usb /media/usuario/USB \
+  --source /home/usuario/Music \
   --dry-run
+```
 
-# Provisión completa
+### Provision real
+
+```bash
 cargo run -p lap-bin-provision -- \
   provision \
-  --usb /media/user/USB_TARGET \
-  --source ~/Music
+  --usb /media/usuario/USB \
+  --source /home/usuario/Music
+```
 
-# Sincronización incremental
+### Sync incremental
+
+```bash
 cargo run -p lap-bin-provision -- \
   provision \
-  --usb /media/user/USB_TARGET \
-  --source ~/Music \
+  --usb /media/usuario/USB \
+  --source /home/usuario/Music \
   --sync
+```
 
-# Eventos IPC JSON
+### In-place rebuild
+
+```bash
+cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/USB \
+  --source /media/usuario/USB \
+  --in-place-rebuild
+```
+
+### JSON IPC para integración UI
+
+```bash
 cargo run -p lap-bin-provision -- \
   --json \
   provision \
-  --usb /media/user/USB_TARGET \
-  --source ~/Music \
+  --usb /media/usuario/USB \
+  --source /home/usuario/Music \
   --sync
+```
 
-# Reanudación tras fallo
+### Reformateo seguro (con backup previo)
+
+```bash
+cargo run -p lap-bin-provision -- \
+  format \
+  --usb /media/usuario/USB \
+  --confirm-device /dev/sdb1 \
+  --label CABINA_A
+```
+
+### Reanudar sesión interrumpida
+
+`--resume` espera un directorio que contiene `.provisioning_checkpoint`.
+
+```bash
 cargo run -p lap-bin-provision -- \
   resume \
-  --usb /media/user/USB_TARGET \
-  --resume ~/usb_backup_20260315_1430
-
-# Ingesta dedicada
-cargo run -p lap-bin-ingest -- --help
-
-# Herramientas auxiliares
-cargo run -p lap-cli-tools -- --help
+  --usb /media/usuario/USB \
+  --resume /ruta/al/directorio/de/checkpoint
 ```
 
-## Developer QA
-
-Estado actual de calidad verificado:
-
-- 55 unit tests
-- 23 integration tests
-- 2 doc tests
-- Total: 80/80 passing
-
-Runbook QA:
+### Ingest y refactor
 
 ```bash
-cargo test
+cargo run -p lap-bin-provision -- ingest --usb /media/usuario/USB --source /ruta/staging
+cargo run -p lap-bin-provision -- refactor --usb /media/usuario/USB --source /ruta/staging
+```
+
+## Runbook Recomendado
+
+### Operación diaria (segura)
+
+1. Ejecuta `list` y confirma el mount correcto.
+2. Ejecuta `provision --dry-run`.
+3. Revisa salida, tamaño y conteo.
+4. Ejecuta `provision` real.
+5. Confirma `SUCCESS` y eject seguro.
+
+### Múltiples USB en paralelo operativo (sin contaminación de estado)
+
+1. Cada USB obtiene su `device_key`.
+2. Estado se separa automáticamente por `device_key` en `~/.lap`.
+3. Puedes correr en distintas sesiones sin mezclar manifest/checkpoint/journal entre USB.
+
+### Variable opcional para ubicar estado en otro disco
+
+```bash
+export LAP_STATE_DIR=/mnt/estado_lap
+```
+
+## Modelo De Seguridad Operativa
+
+1. Source (`Music`) se trata como input, no como storage operativo.
+2. Backup-first antes de mutar USB.
+3. Quarantine backup-first para untracked.
+4. Checkpoint atómico en host.
+5. Verificación final antes de eject.
+
+Errores tipados relevantes:
+
+1. `CONCURRENCY_ERROR`
+2. `FILESYSTEM_READ_ONLY`
+3. `ENOSPC_ERROR`
+4. `HARDWARE_FRAUD_DETECTED`
+5. `DRM_PROTECTED`
+6. `PROVISIONING_FAILED`
+7. `INVALID_CONFIG`
+
+## Solución De Problemas
+
+### No encuentra `Cargo.toml`
+
+Corre comandos desde la raíz del repo:
+
+```bash
+cd /ruta/legacy-audio-provisioner
+```
+
+### Lock stale en USB
+
+Si el proceso anterior se interrumpió y no hay PID activo, elimina lock manualmente y reintenta:
+
+```bash
+rm -f /media/usuario/USB/.lap_provisioning.lock
+```
+
+### Disco host sin espacio para backup
+
+LAP falla por diseño con `ENOSPC_ERROR`.
+Libera espacio en el disco donde vive `~/.lap` o apunta `LAP_STATE_DIR` a otro volumen.
+
+### `source` y `usb` inválidos
+
+Se valida canonical path y se bloquean combinaciones peligrosas.
+En `--in-place-rebuild` el origen debe ser el propio mount USB.
+
+## Desarrollo Y QA
+
+Comandos recomendados:
+
+```bash
+cargo build --workspace
+cargo test -p lap-core --lib
 cargo test -p lap-core --test integration_test
+cargo test -p lap-bin-provision
+cargo clippy -p lap-core -- -D warnings
 ```
 
-Cobertura relevante de Fase 2:
+## Documentación Relacionada
 
-- diff incremental por hash
-- cuarentena backup-first de huérfanos
-- contrato IPC JSON
-- errores tipados (`DRM_PROTECTED`, `FILESYSTEM_READ_ONLY`, `HARDWARE_FRAUD_DETECTED`, `ENOSPC_ERROR`)
+1. [docs/README.md](docs/README.md)
+2. [docs/spec/tech_spec.md](docs/spec/tech_spec.md)
+3. [docs/spec/requirements_traceability.md](docs/spec/requirements_traceability.md)
+4. [docs/contracts/design_by_contract.md](docs/contracts/design_by_contract.md)
+5. [docs/adr](docs/adr)
+6. [CHECKLIST.md](CHECKLIST.md)
 
-## Documentation
-
-- [Documentation Index](docs/README.md)
-- [Tech Spec](docs/spec/tech_spec.md)
-- [Requirements Traceability](docs/spec/requirements_traceability.md)
-- [Design by Contract](docs/contracts/design_by_contract.md)
-- [ADR History (Immutable, Canonical)](docs/adr/)
-- [Release Checklist](CHECKLIST.md)
-
-## Build
-
-```bash
-cargo build --release
-```
-
-## License
+## Licencia
 
 MIT
