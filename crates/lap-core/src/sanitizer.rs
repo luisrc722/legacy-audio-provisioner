@@ -104,8 +104,8 @@ pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &
             .collect();
     }
 
-    let cleaned = sanitize_filename(original_stem);
-    let cleaned = strip_leading_track_prefix(&cleaned);
+    let stripped = strip_leading_track_prefix(original_stem);
+    let cleaned = sanitize_filename(&stripped);
     let mut safe_stem = if cleaned.is_empty() {
         "audio".to_string()
     } else {
@@ -141,25 +141,17 @@ fn hash8_from_sha256_hex(input: &str) -> String {
 }
 
 fn strip_leading_track_prefix(input: &str) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    if chars.is_empty() || !chars[0].is_ascii_digit() {
-        return input.to_string();
-    }
-
-    let mut i = 0usize;
-    while i < chars.len() && chars[i].is_ascii_digit() {
-        i += 1;
-    }
-
-    let mut j = i;
-    while j < chars.len() && matches!(chars[j], ' ' | '-' | '_' | '.') {
-        j += 1;
-    }
-
-    if j > i && j < chars.len() {
-        chars[j..].iter().collect()
-    } else {
+    // Quita del inicio cualquier combinación de dígitos, espacios, guiones y underscores.
+    // Se llama sobre el stem original (antes de sanitize_filename) para que los espacios
+    // aún sean visibles como separadores de prefijo de pista.
+    // Si el string completo es ruido (e.g. "1979" como año en un título) se conserva.
+    let trimmed = input.trim_start_matches(|c: char| {
+        c.is_ascii_digit() || c == '-' || c == '_' || c == ' ' || c == '.'
+    });
+    if trimmed.is_empty() {
         input.to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -176,10 +168,20 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_leading_track_prefix_only_when_separator_exists() {
+    fn test_strip_leading_track_prefix() {
+        // prefijo numérico con separador dash
         assert_eq!(strip_leading_track_prefix("01-Track"), "Track");
         assert_eq!(strip_leading_track_prefix("007__Song"), "Song");
+        // prefijo numérico con espacio (como llega antes de sanitize_filename)
+        assert_eq!(strip_leading_track_prefix("1 Mala y Peligrosa"), "Mala y Peligrosa");
+        assert_eq!(strip_leading_track_prefix("000 Audiomovil spot"), "Audiomovil spot");
+        assert_eq!(strip_leading_track_prefix("01 - Cancion De Prueba"), "Cancion De Prueba");
+        // guiones y underscores al inicio sin dígitos
+        assert_eq!(strip_leading_track_prefix("_foo"), "foo");
+        assert_eq!(strip_leading_track_prefix("--cancion"), "cancion");
+        // título que es sólo dígitos → se conserva íntegro (fallback)
         assert_eq!(strip_leading_track_prefix("1979"), "1979");
+        // sin prefijo → sin cambios
         assert_eq!(strip_leading_track_prefix("Track01"), "Track01");
     }
 
