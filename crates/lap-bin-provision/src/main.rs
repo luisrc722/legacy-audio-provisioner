@@ -245,6 +245,12 @@ enum Commands {
 
         #[arg(
             long,
+            help = "Preflight estricto: exige paridad source<->manifest y manifest<->USB antes de mutar contenido (requiere --sync)"
+        )]
+        strict_parity: bool,
+
+        #[arg(
+            long,
             help = "Reconstruye topologia y nombres in-place sobre la USB con renames de metadatos (sin ffmpeg, sin staging)"
         )]
         in_place_rebuild: bool,
@@ -363,6 +369,7 @@ fn main() -> std::result::Result<(), ProvisioningError> {
             source,
             dry_run,
             sync,
+            strict_parity,
             in_place_rebuild,
         } => {
             if in_place_rebuild {
@@ -408,7 +415,7 @@ fn main() -> std::result::Result<(), ProvisioningError> {
             }
 
             orchestrator
-                .provision_usb(&usb, &source, dry_run, sync, in_place_rebuild)
+                .provision_usb(&usb, &source, dry_run, sync, strict_parity, in_place_rebuild)
                 .map_err(ProvisioningError::from_anyhow)
         }
         Commands::Format {

@@ -7,6 +7,33 @@ Supongamos que tienes:
 - Una USB montada en `/media/usuario/DISCO_USB`
 - Un estéreo antiguo que solo acepta FAT32 con máximo 50 archivos por carpeta
 
+## Playbook Rápido: USB Nueva (3 comandos)
+
+Si la USB está vacía, se trata como destino nuevo. Este es el flujo recomendado:
+
+```bash
+# 1) Detectar y validar dispositivos
+cargo run -p lap-bin-provision -- list
+
+# 2) (Opcional) Reformatear a perfil legacy FAT32 32KB si no cumple
+cargo run -p lap-bin-provision -- \
+  format \
+  --usb /media/usuario/DISCO_USB \
+  --confirm-device /dev/sdb1
+
+# 3) Provisionar desde cero
+cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
+  --verbose
+```
+
+Notas:
+- Si en el paso 2 la USB ya cumple perfil legacy, `format` termina en no-op seguro.
+- En USB vacía, el backup-first es valido y puede resultar en no-op de contenido.
+- El primer `provision` copia todo como contenido nuevo y deja estado operativo host-only en `~/.lap`.
+
 ## Paso 1: Montar la USB (Manual)
 
 ```bash
@@ -125,6 +152,25 @@ cargo run -p lap-bin-provision -- \
 ```
 
 El recovery compara los SHA256 reales de la USB contra el checkpoint y solo recopia los archivos faltantes o corruptos. Los archivos ya copiados correctamente **no se tocan**.
+
+### Caso 5: Source host "sucia" con validación estricta de paridad
+
+Si quieres bloquear el proceso cuando el source no coincide exactamente con el baseline procesado, usa `--strict-parity` (requiere `--sync`).
+
+```bash
+cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
+  --sync \
+  --strict-parity
+```
+
+`--strict-parity` valida antes de mutar contenido:
+1. source -> manifest: todos los hashes del source deben existir en el manifest baseline.
+2. manifest -> USB: cada entrada del manifest debe existir en USB y coincidir en hash.
+
+Si falla alguna paridad, aborta con `INVALID_CONFIG` y no modifica la USB.
 
 ## Estructura Resultante en USB
 

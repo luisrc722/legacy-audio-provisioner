@@ -394,7 +394,7 @@ impl ProvisioningOrchestrator {
 
         self.ingest_staging(usb, source)?;
         self.validate_canonical_paths(usb, source)?;
-        self.provision_usb(usb, source, false, true, false)?;
+        self.provision_usb(usb, source, false, true, false, false)?;
 
         if !keep_staging {
             fs::remove_dir_all(source)
@@ -745,6 +745,7 @@ impl ProvisioningOrchestrator {
         audio_source: &Path,
         dry_run: bool,
         sync_mode: bool,
+        strict_parity: bool,
         in_place_rebuild: bool,
     ) -> Result<()> {
         if in_place_rebuild {
@@ -807,6 +808,34 @@ impl ProvisioningOrchestrator {
             std::collections::HashMap::new();
         let mut move_journal: Option<journal::JournalManager> = None;
         let state_paths = state::paths_for_device(&device.backup_identity_key())?;
+
+        if strict_parity {
+            if !sync_mode {
+                return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
+                    details: tr(
+                        "--strict-parity requiere --sync para validar paridad incremental.",
+                        "--strict-parity requires --sync to validate incremental parity."
+                    )
+                    .to_string(),
+                }));
+            }
+
+            self.reporter.info(tr(
+                "Paso 2.0: Validando paridad estricta source<->manifest y manifest<->USB...",
+                "Step 2.0: Validating strict source<->manifest and manifest<->USB parity...",
+            ));
+
+            Self::enforce_strict_parity_preflight(
+                &discovered_source_files,
+                usb_mount,
+                &state_paths.manifest_file,
+            )?;
+
+            self.reporter.info(tr(
+                "Paridad estricta validada correctamente.",
+                "Strict parity validated successfully."
+            ));
+        }
 
         if sync_mode {
             self.reporter
@@ -1782,6 +1811,94 @@ impl ProvisioningOrchestrator {
         }
 
         Ok(removed)
+    }
+
+    fn enforce_strict_parity_preflight(
+        source_files: &[audio_discovery::AudioFile],
+        usb_mount: &Path,
+        manifest_path: &Path,
+    ) -> Result<()> {
+        let processed_manifest = manifest::ProcessedFileManifest::load_or_create_at(manifest_path)?;
+
+        if processed_manifest.total_processed() == 0 {
+            return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
+                details: tr(
+                    "No existe baseline de manifest para --strict-parity. Ejecute primero una provisión inicial sin strict parity.",
+                    "No manifest baseline exists for --strict-parity. Run an initial provisioning without strict parity first."
+                )
+                .to_string(),
+            }));
+        }
+
+        let mut source_not_in_manifest: Vec<String> = Vec::new();
+        for file in source_files {
+            let source_hash = compute_file_sha256(&file.path).with_context(|| {
+                format!(
+                    "No se pudo calcular SHA256 para validar strict parity en '{}'",
+                    file.path.display()
+                )
+            })?;
+
+            if !processed_manifest.is_content_already_processed(&source_hash) {
+                source_not_in_manifest.push(file.path.display().to_string());
+                if source_not_in_manifest.len() >= 5 {
+                    break;
+                }
+            }
+        }
+
+        if !source_not_in_manifest.is_empty() {
+            return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
+                details: format!(
+                    "Strict parity rechazo: archivo(s) del source no estan en el manifest baseline. Ejemplos: {}",
+                    source_not_in_manifest.join(", ")
+                ),
+            }));
+        }
+
+        let mut manifest_usb_drift: Vec<String> = Vec::new();
+        for (expected_hash, entry) in &processed_manifest.entries_by_hash {
+            let usb_relative = Path::new(&entry.usb_relative_path);
+            let usb_absolute = validate_path_containment(usb_mount, usb_relative).with_context(|| {
+                format!(
+                    "Manifest contiene ruta fuera de contencion USB: {}",
+                    entry.usb_relative_path
+                )
+            })?;
+
+            if !usb_absolute.exists() {
+                manifest_usb_drift.push(format!("missing:{}", entry.usb_relative_path));
+                if manifest_usb_drift.len() >= 5 {
+                    break;
+                }
+                continue;
+            }
+
+            let actual_hash = compute_file_sha256(&usb_absolute).with_context(|| {
+                format!(
+                    "No se pudo calcular SHA256 para '{}', durante strict parity",
+                    usb_absolute.display()
+                )
+            })?;
+
+            if &actual_hash != expected_hash {
+                manifest_usb_drift.push(format!("hash_mismatch:{}", entry.usb_relative_path));
+                if manifest_usb_drift.len() >= 5 {
+                    break;
+                }
+            }
+        }
+
+        if !manifest_usb_drift.is_empty() {
+            return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
+                details: format!(
+                    "Strict parity rechazo: el baseline manifest no coincide con el contenido USB actual. Ejemplos: {}",
+                    manifest_usb_drift.join(", ")
+                ),
+            }));
+        }
+
+        Ok(())
     }
 
     fn backup_usb_tree(
