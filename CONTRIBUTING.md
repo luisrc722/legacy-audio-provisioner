@@ -213,6 +213,42 @@ Describe:
 - **Cómo** cumple la especificación
 - Tests agregados/modificados
 
+## Politica de Versionamiento y Releases
+
+Este repositorio usa **SemVer en linea 0.x** con cortes por bloque funcional (no por calendario fijo).
+
+### Regla de bump
+
+1. **PATCH** (`0.x.y -> 0.x.(y+1)`): fixes internos, limpieza, docs sin cambio de comportamiento publico.
+2. **MINOR** (`0.x.y -> 0.(x+1).0`): nuevas capacidades compatibles (flags, flujos, validaciones opcionales).
+3. **MAJOR** (`0.x.y -> 1.0.0` o `N.0.0`): cambios incompatibles en CLI, contratos JSON o semantica observable por integradores.
+
+### Criterio de corte recomendado
+
+- Cortar release cuando exista un bloque funcional cerrado (aprox. 3-6 commits utiles) con codigo + pruebas + docs alineadas.
+- Evitar cortes con cambios puramente cosmeticos salvo que sean parte de estabilizacion final.
+
+### Checklist minimo de release
+
+1. `CHANGELOG.md`:
+    - Mover cambios desde `Unreleased` a la nueva version fechada.
+    - Dejar `Unreleased` limpio.
+2. `Cargo.toml`:
+    - Actualizar `workspace.package.version`.
+3. Verificacion local:
+    - `cargo test -p lap-core --test integration_test`
+    - `cargo test -p lap-bin-provision --test structured_logging_test`
+    - `./scripts/traceability_lint.sh`
+4. Git:
+    - Commit de release (ejemplo: `release: cortar 0.4.0`).
+    - Tag anotado (`vX.Y.Z`) apuntando al commit de release.
+    - Push de rama y tag.
+
+### Convencion de historial
+
+- Mantener mensajes de commit compatibles con Conventional Commits (`feat`, `fix`, `docs`, `refactor`, `chore`, `release`).
+- Usar `feat!` o `BREAKING CHANGE` para marcar cambios potencialmente incompatibles.
+
 ## Tareas por Prioridad
 
 ### High Priority (Bloquean release 0.1)
