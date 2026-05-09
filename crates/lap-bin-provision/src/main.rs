@@ -10,6 +10,7 @@ use std::sync::{Mutex, OnceLock};
 
 use lap_core::error::ProvisioningError;
 use lap_core::ipc::IpcEvent;
+use lap_core::state;
 
 mod orchestrator;
 mod reporter;
@@ -33,10 +34,7 @@ fn init_session_logger() -> Result<PathBuf> {
     let base_dir = if let Ok(custom) = std::env::var("LAP_LOG_DIR") {
         PathBuf::from(custom)
     } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home)
-            .join(".legacy_audio_provisioner")
-            .join("logs")
+        state::state_root_dir()?.join("logs")
     };
 
     fs::create_dir_all(&base_dir).with_context(|| {
