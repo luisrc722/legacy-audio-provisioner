@@ -127,6 +127,12 @@ Nota importante:
 
 ## Comandos
 
+Nota sobre sintaxis:
+
+1. En `cargo run -p lap-bin-provision -- <comando>`, el `--` separa argumentos de `cargo` de argumentos de la aplicación.
+2. `list`, `scan`, `provision`, etc. son subcomandos de `lap-bin-provision`, no flags.
+3. Si prefieres evitar esa sintaxis, ejecuta el binario directo: `target/debug/lap-bin-provision <comando>`.
+
 ### Build
 
 ```bash
@@ -138,18 +144,26 @@ cargo build --workspace --release
 
 ```bash
 cargo run -p lap-bin-provision -- list
+target/debug/lap-bin-provision list
 ```
 
 ### Escanear audio en USB
 
 ```bash
 cargo run -p lap-bin-provision -- scan --usb /media/usuario/USB
+target/debug/lap-bin-provision scan --usb /media/usuario/USB
 ```
 
 ### Dry-run seguro
 
 ```bash
 cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/USB \
+  --source /home/usuario/Music \
+  --dry-run
+
+target/debug/lap-bin-provision \
   provision \
   --usb /media/usuario/USB \
   --source /home/usuario/Music \
@@ -184,6 +198,12 @@ cargo run -p lap-bin-provision -- \
   --source /media/usuario/USB \
   --in-place-rebuild
 ```
+
+Nota operativa:
+
+1. En la versión actual, `--source` sigue siendo obligatorio por contrato del CLI.
+2. Con `--in-place-rebuild`, el entrypoint valida que `--source` y `--usb` resuelvan al mismo mount.
+3. Si no coinciden, la ejecución falla con `INVALID_CONFIG`.
 
 ### JSON IPC para integración UI
 
