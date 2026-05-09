@@ -9,7 +9,7 @@ Legacy Audio Provisioner es un proyecto de **Spec-Driven Development** enfocado 
 Familiarízate con:
 1. **SPECIFICATION**: Leer [docs/spec/requirements_traceability.md](docs/spec/requirements_traceability.md) y [docs/guides/requirements_workflow.md](docs/guides/requirements_workflow.md)
 2. **ARCHITECTURE**: Entender el flujo en [docs/architecture/architecture_overview.md](docs/architecture/architecture_overview.md)
-3. **CODE**: Revisar la estructura actual en `src/`
+3. **CODE**: Revisar la estructura actual en `crates/` (especialmente `crates/lap-core/` y `crates/lap-bin-provision/`)
 4. **AI DOC PROMPT** (si usas IA para ADR/spec): usar [docs/guides/ai_master_prompt_google_style.md](docs/guides/ai_master_prompt_google_style.md)
 
 ## Setup de Desarrollo
@@ -61,8 +61,8 @@ STRICT_PROPOSED=1 bash scripts/traceability_lint.sh
 cargo install cargo-watch
 make dev
 
-# Linting automático
-cargo install clippy
+# Linting
+rustup component add clippy
 
 # Coverage de tests
 cargo install cargo-tarpaulin
@@ -75,7 +75,7 @@ rustup component add rustfmt
 ### Documentación
 
 ```bash
-# Generary y ver documentación
+# Generar y ver documentación
 make docs
 
 # Ver módulos internos
@@ -227,7 +227,7 @@ Describe:
 - [ ] Normalización de bitrate (VBR→CBR)
 - [ ] Interfaz interactiva con confirmaciones
 - [ ] Soporte multi-plataforma (Windows, macOS)
-- [ ] Progress bars (`indicatif`)
+- [ ] Cobertura i18n completa en mensajes runtime y eventos JSON
 
 ### Low Priority (Enhancements)
 
@@ -256,10 +256,10 @@ pub fn strip_id3v2(file_path: &Path) -> Result<()> {
     // 4. Crear nuevo archivo sin los primeros N bytes
     // 5. Reemplazar original
 }
-- [ ] Cobertura E2E destructiva adicional (adversarial para R-02-* y R-05-*)
-    // TODO: agregar perfiles por generación de firmware
-}
+// TODO: agregar perfiles por generación de firmware
 ```
+
+- [ ] Cobertura E2E destructiva adicional (adversarial para R-02-* y R-05-*)
 
 ### 2. Device Detection (`hardware.rs`)
 
@@ -339,9 +339,9 @@ pub fn verify_directory_structure(usb_path: &Path) -> Result<VerificationReport>
 
 ```bash
 # Diferentes niveles
-RUST_LOG=trace cargo run -- --verbose
-RUST_LOG=debug cargo run -- -vv
-RUST_LOG=info cargo run --
+RUST_LOG=trace cargo run -p lap-bin-provision -- --lang es list -vv
+RUST_LOG=debug cargo run -p lap-bin-provision -- provision --usb /media/usuario/USB --source ~/MiMusica -v
+RUST_LOG=info cargo run -p lap-bin-provision -- scan --usb /media/usuario/USB
 ```
 
 ### Print Debugging
@@ -361,17 +361,17 @@ log::debug!("Processing file: {}", path.display());
 
 ```bash
 # Compilar con symbols
-cargo build --verbose
+cargo build -p lap-bin-provision --verbose
 
 # Con GDB (Linux)
-gdb ./target/debug/legacy-audio-provisioner
-(gdb) run --usb-mount /tmp/test --audio-source .
+gdb ./target/debug/lap-bin-provision
+(gdb) run list
 (gdb) break filename.rs:42
 (gdb) continue
 (gdb) print variable
 
 # Con LLDB (macOS)
-lldb ./target/debug/legacy-audio-provisioner
+lldb ./target/debug/lap-bin-provision
 (lldb) breakpoint set --file sanitizer.rs --line 42
 ```
 
@@ -379,15 +379,15 @@ lldb ./target/debug/legacy-audio-provisioner
 
 ```bash
 # Compilar en release
-cargo build --release
+cargo build --release -p lap-bin-provision
 
 # Usar perf (Linux)
-perf record -g ./target/release/legacy-audio-provisioner ...
+perf record -g ./target/release/lap-bin-provision provision --usb /media/usuario/USB --source ~/MiMusica
 perf report
 
 # O usar flamegraph
 cargo install flamegraph
-cargo flamegraph -- --usb-mount /tmp --audio-source .
+cargo flamegraph -p lap-bin-provision -- provision --usb /media/usuario/USB --source ~/MiMusica
 ```
 
 ## Documentación de Cambios
@@ -425,9 +425,10 @@ Antes de hacer push:
 - [ ] Tests pasan: `make test`
 - [ ] Código formateado: `make fmt`
 - [ ] No hay warnings: `make lint`
+- [ ] Trazabilidad validada: `bash scripts/traceability_lint.sh`
 - [ ] Documentación clara (docstrings)
 - [ ] Ejemplos en tests (cuando aplica)
-- [ ] Cambios documentados (`README.md` y `docs/architecture/architecture_overview.md`)
+- [ ] Cambios documentados (`README.md`, `docs/spec/tech_spec.md` y arquitectura si aplica)
 - [ ] Commits con mensajes claros
 
 ## Reportar Issues
@@ -441,7 +442,7 @@ Qué está pasando mal / qué feature falta
 ### Reproduce
 Pasos para reproducir:
 1. Compilar: `cargo build`
-2. Ejecutar: `./target/debug/... --usb-mount /tmp`
+2. Ejecutar: `./target/debug/lap-bin-provision list`
 3. Observar error
 
 ### Expected
@@ -456,7 +457,7 @@ Qué debería pasar
 ## Preguntas?
 
 - Leer `docs/architecture/architecture_overview.md` 📖
-- Revisar tests en `src/**/*.rs` 🧪
+- Revisar tests en `crates/**/*.rs` 🧪
 - Abrir issue para discusión 💬
 
 **Happy coding! 🚀**
