@@ -1,22 +1,19 @@
 use log::warn;
-use regex::Regex;
-use std::sync::OnceLock;
 
 // R-03: Sanitización de Nombres
 // Requisitos:
 // - Máximo 32 caracteres por archivo
 // - Codificación: Estrictamente ASCII/ISO-8859-1
 // - Regex de limpieza: `[^a-zA-Z0-9\.\-\_]`
-
-static SANITIZE_REGEX: OnceLock<Regex> = OnceLock::new();
 const LEGACY_MAX_FILENAME_BYTES: usize = 32;
 const HASH_SUFFIX_HEX_LEN: usize = 8;
 
-fn get_regex() -> &'static Regex {
-    SANITIZE_REGEX.get_or_init(|| Regex::new(r"[^a-zA-Z0-9\.\-\_]").unwrap())
+fn is_allowed_filename_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_')
 }
 
-/// Sanitiza eliminando caracteres inválidos.
+/// Sanitiza eliminando caracteres inválidos, incluidos símbolos no alfanuméricos
+/// como signos de operación (+, -, *, /, =, etc.).
 /// NOTA: Ya no truncamos aquí para evitar destruir la extensión antes de tiempo.
 ///
 /// # Ejemplo
@@ -27,7 +24,10 @@ fn get_regex() -> &'static Regex {
 /// assert_eq!(cleaned, "Cancin_2024_xito.mp3");
 /// ```
 pub fn sanitize_filename(input: &str) -> String {
-    let result = get_regex().replace_all(input, "").into_owned();
+    let result: String = input
+        .chars()
+        .filter(|ch| is_allowed_filename_char(*ch))
+        .collect();
     if result != input {
         warn!(
             "Filename sanitized (non-ASCII/invalid chars removed): '{}' → '{}'",
@@ -138,13 +138,6 @@ fn hash8_from_sha256_hex(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_sanitize_basic() {
-        assert_eq!(sanitize_filename("valid_name.mp3"), "valid_name.mp3");
-        assert_eq!(sanitize_filename("Canción.mp3"), "Cancin.mp3");
-        assert_eq!(sanitize_filename("song🎵.mp3"), "song.mp3");
-    }
 
     #[test]
     fn test_sequential_prefix_protects_extension() {

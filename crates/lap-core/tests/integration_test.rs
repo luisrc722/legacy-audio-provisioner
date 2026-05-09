@@ -160,6 +160,14 @@ fn test_00_system_dependencies() {
 }
 
 #[test]
+fn test_00a_sanitize_filename_rules() {
+    assert_eq!(sanitizer::sanitize_filename("valid_name.mp3"), "valid_name.mp3");
+    assert_eq!(sanitizer::sanitize_filename("Canción.mp3"), "Cancin.mp3");
+    assert_eq!(sanitizer::sanitize_filename("song🎵.mp3"), "song.mp3");
+    assert_eq!(sanitizer::sanitize_filename("Tema + Remix = 2026.mp3"), "TemaRemix2026.mp3");
+}
+
+#[test]
 fn test_01_real_sanitization_and_distribution() -> anyhow::Result<()> {
     let long_name = format!("{}.mp3", "a".repeat(40));
     let test_files = [

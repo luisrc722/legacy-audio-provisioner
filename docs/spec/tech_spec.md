@@ -21,7 +21,7 @@ Los firmwares legacy fallan ante:
 
 ## Requisitos Funcionales
 ### R-03 Sanitizacion
-- Eliminar caracteres no permitidos.
+- Eliminar caracteres no permitidos, incluyendo signos de operacion y simbolos no alfanumericos similares.
 - Mantener extension de archivo.
 - Prefijo secuencial (`001_`, `002_`, ...).
 - Forzar `<= 32` caracteres en el nombre final.
