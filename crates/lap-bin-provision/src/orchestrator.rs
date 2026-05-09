@@ -5,7 +5,8 @@ use lap_core::ipc::IpcEvent;
 use lap_core::security::validate_path_containment;
 use lap_core::{
     audio_discovery, backup, checkpoint, diffing, distribution, hardware, ingestion, journal,
-    in_place_transformer::InPlaceTransformer, manifest, normalizer, recovery, sanitizer, verification,
+    in_place_transformer::InPlaceTransformer, manifest, normalizer, recovery, sanitizer, state,
+    verification,
 };
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -151,10 +152,12 @@ impl ProvisioningOrchestrator {
         }
 
         self.reporter.info("Step 1: Creating pre-format backup...");
-        let backup_home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let backup_home_path = Path::new(&backup_home);
+        let state_paths = state::paths_for_device(&format!(
+            "preformat__{}",
+            device.backup_identity_key()
+        ))?;
         let mut backup_meta = backup::BackupMetadata::new_for_target(
-            backup_home_path,
+            &state_paths.backup_base_dir,
             &format!("preformat__{}", device.backup_identity_key()),
         )?;
 
@@ -378,19 +381,49 @@ impl ProvisioningOrchestrator {
             return Ok(());
         }
 
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let checkpoint_dir = Path::new(&home)
-            .join(".legacy_audio_provisioner")
-            .join("checkpoints")
-            .join(format!("in_place_{}", device.backup_identity_key()));
-        fs::create_dir_all(&checkpoint_dir).with_context(|| {
-            format!(
-                "No se pudo crear directorio de checkpoint '{}'",
-                checkpoint_dir.display()
-            )
-        })?;
+        let in_place_key = format!("in_place__{}", device.backup_identity_key());
+        let state_paths = state::paths_for_device(&in_place_key)?;
+        let checkpoint_dir = state_paths.checkpoint_dir.clone();
+        let checkpoint_file = state_paths.checkpoint_file.clone();
 
-        let checkpoint_file = checkpoint_dir.join(".provisioning_checkpoint");
+        self.reporter
+            .info("Step 2.5: Backup-first snapshot before in-place mutations...");
+        let required_backup_bytes: u64 = plan
+            .entries
+            .iter()
+            .map(|entry| {
+                if entry.source_path.exists() {
+                    fs::metadata(&entry.source_path).map(|m| m.len()).unwrap_or(0)
+                } else if entry.destination_path.exists() {
+                    fs::metadata(&entry.destination_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            })
+            .sum();
+        backup::check_disk_space(required_backup_bytes, &state_paths.backup_base_dir)?;
+
+        let mut backup_meta =
+            backup::BackupMetadata::new_for_target(&state_paths.backup_base_dir, &in_place_key)?;
+        for entry in &plan.entries {
+            if entry.source_path.exists() {
+                backup_meta.backup_file(&entry.source_path)?;
+            } else if entry.destination_path.exists() {
+                backup_meta.backup_file(&entry.destination_path)?;
+            }
+        }
+        if !backup_meta.verify_backup()? {
+            return Err(anyhow::anyhow!(
+                "Backup verification failed before in-place rebuild"
+            ));
+        }
+        self.reporter.info(&format!(
+            "Backup-first in-place verified. Directory: {}",
+            backup_meta.backup_dir.display()
+        ));
+
         let mut resumed_mode = false;
         let mut checkpoint = if checkpoint_file.exists() {
             match checkpoint::CheckpointManager::load_from_disk(&checkpoint_file) {
@@ -570,7 +603,6 @@ impl ProvisioningOrchestrator {
         }
 
         checkpoint.finalize()?;
-        Self::mirror_checkpoint_to_usb(&checkpoint, usb_mount)?;
 
         self.reporter.info("Step 5: Safe ejection...");
         verification::safe_eject(&device.device_path, usb_mount)?;
@@ -643,14 +675,14 @@ impl ProvisioningOrchestrator {
         let mut displaced_in_target: std::collections::HashMap<PathBuf, PathBuf> =
             std::collections::HashMap::new();
         let mut move_journal: Option<journal::JournalManager> = None;
+        let state_paths = state::paths_for_device(&device.backup_identity_key())?;
 
         if sync_mode {
             self.reporter
                 .info("Step 2.1: Incremental sync mode enabled (USB hash diff)...");
 
-            let usb_checkpoint_path = usb_mount.join(".provisioning_checkpoint");
-            if usb_checkpoint_path.exists() {
-                if let Ok(usb_checkpoint_mgr) = checkpoint::CheckpointManager::load_from_disk(&usb_checkpoint_path) {
+            if state_paths.checkpoint_file.exists() {
+                if let Ok(usb_checkpoint_mgr) = checkpoint::CheckpointManager::load_from_disk(&state_paths.checkpoint_file) {
                     for file_cp in usb_checkpoint_mgr.get_data().processed_files.values() {
                         checkpoint_known_names.insert(file_cp.normalized_name.clone());
                         if let Some((prefix, _)) = file_cp.normalized_name.split_once('_') {
@@ -660,7 +692,7 @@ impl ProvisioningOrchestrator {
                         }
                     }
                     self.reporter.info(&format!(
-                        "Checkpoint USB cargado: {} entradas conocidas",
+                        "Checkpoint host cargado: {} entradas conocidas",
                         checkpoint_known_names.len()
                     ));
                 }
@@ -696,7 +728,7 @@ impl ProvisioningOrchestrator {
                 displaced_in_target.len()
             ));
 
-            let mut mgr = journal::JournalManager::load_or_create(usb_mount)?;
+            let mut mgr = journal::JournalManager::load_or_create_at(&state_paths.journal_file)?;
             let summary = mgr.reconcile(usb_mount)?;
             if summary.total > 0 {
                 self.reporter.info(&format!(
@@ -774,8 +806,7 @@ impl ProvisioningOrchestrator {
         }
 
         self.reporter.info("\nStep 3: Validating backup capacity...");
-        let backup_home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let backup_home_path = Path::new(&backup_home);
+        let backup_home_path = state_paths.backup_base_dir.as_path();
         let new_audio_size: u64 = audio_files.iter().map(|f| f.size_bytes).sum();
         let untracked_backup_size: u64 = untracked_in_target
             .iter()
@@ -914,8 +945,8 @@ impl ProvisioningOrchestrator {
             .info("\nStep 4: Forcing MP3 extension, Sanitizing & Initializing Checkpoint...");
         let checkpoint_backup_dir = backup
             .as_ref()
-            .map(|b| b.backup_dir.clone())
-            .unwrap_or_else(|| backup_home_path.join("dry_run_no_backup"));
+            .map(|_| state_paths.checkpoint_dir.clone())
+            .unwrap_or_else(|| state_paths.checkpoint_dir.clone());
         let mut checkpoint = checkpoint::CheckpointManager::new(
             checkpoint_backup_dir,
             usb_mount.to_path_buf(),
@@ -1038,7 +1069,8 @@ impl ProvisioningOrchestrator {
             let mut global_idx = 0;
             let mut skipped_drm = 0usize;
             let mut skipped_failed = 0usize;
-            let mut processed_manifest = manifest::ProcessedFileManifest::load_or_create(usb_mount)?;
+            let mut processed_manifest =
+                manifest::ProcessedFileManifest::load_or_create_at(&state_paths.manifest_file)?;
             self.reporter.start_progress(audio_files.len() as u64)?;
 
             for volume in volumes {
@@ -1304,8 +1336,8 @@ impl ProvisioningOrchestrator {
                     global_idx += 1;
                 }
 
-                // Guardar manifest cada volumen completado para persistencia incremental
-                processed_manifest.save_to_usb(usb_mount)?;
+                // Guardar manifest por volumen (host-scoped por dispositivo).
+                processed_manifest.save_to_path(&state_paths.manifest_file)?;
 
                 // [R-02-010] Mitigacion de Desgaste NAND / Optimizacion I/O
                 // Politica: no forzar sync por cada archivo; se consolida flush al cierre de volumen
@@ -1316,9 +1348,6 @@ impl ProvisioningOrchestrator {
 
                 // Consolidar persistencia del checkpoint al cierre de cada volumen.
                 checkpoint.save_to_disk()?;
-                if sync_mode {
-                    Self::mirror_checkpoint_to_usb(&checkpoint, usb_mount)?;
-                }
             }
             self.reporter
                 .finish("Physical distribution and normalization completed.");
@@ -1347,9 +1376,6 @@ impl ProvisioningOrchestrator {
             }
 
             checkpoint.finalize()?;
-            if sync_mode {
-                Self::mirror_checkpoint_to_usb(&checkpoint, usb_mount)?;
-            }
             self.reporter.info("Checkpoint finalized after QA.");
 
             if !dry_run {
@@ -1360,9 +1386,9 @@ impl ProvisioningOrchestrator {
             if sync_mode {
                 if let Some(journal_mgr) = move_journal.as_ref() {
                     if journal_mgr.all_committed() {
-                        journal::JournalManager::clear_from_usb(usb_mount)?;
+                        journal::JournalManager::clear_from_path(&state_paths.journal_file)?;
                         self.reporter
-                            .info("R-33 journal completado y limpiado de la USB.");
+                            .info("R-33 journal completado y limpiado del host.");
                     }
                 }
             }
@@ -1533,29 +1559,6 @@ impl ProvisioningOrchestrator {
         }
 
         Ok(removed)
-    }
-
-    fn mirror_checkpoint_to_usb(
-        checkpoint_mgr: &checkpoint::CheckpointManager,
-        usb_mount: &Path,
-    ) -> Result<()> {
-        let checkpoint_path =
-            validate_path_containment(usb_mount, Path::new(".provisioning_checkpoint"))?;
-        let tmp_path =
-            validate_path_containment(usb_mount, Path::new(".provisioning_checkpoint.tmp"))?;
-        let serialized = serde_json::to_string_pretty(checkpoint_mgr.get_data())?;
-
-        let mut tmp_file = fs::File::create(&tmp_path)?;
-        tmp_file.write_all(serialized.as_bytes())?;
-        tmp_file.sync_all()?;
-
-        fs::rename(&tmp_path, &checkpoint_path)?;
-
-        if let Ok(root_dir) = fs::File::open(usb_mount) {
-            let _ = root_dir.sync_all();
-        }
-
-        Ok(())
     }
 
     fn backup_usb_tree(
