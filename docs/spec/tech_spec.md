@@ -34,8 +34,11 @@ Los firmwares legacy fallan ante:
 
 ### R-05 Backup + integridad
 - Crear backup local de trabajo estable por dispositivo.
+- Derivar identidad de estado con slug + hash corto para evitar colisiones entre dispositivos con metadatos similares.
 - Verificar espacio disponible previo.
+- Tratar errores de metadata en preflight como fallos bloqueantes (no best-effort silencioso).
 - Calcular y verificar checksums en backup.
+- En `--in-place-rebuild`, preservar arbol relativo del mount USB en el backup (no backup plano por nombre).
 
 ### R-06 Discovery + normalizacion
 - Escaneo recursivo con poda temprana de entradas ocultas/sistema.
@@ -51,9 +54,15 @@ Los firmwares legacy fallan ante:
 ### R-23 Sync incremental
 - Modo `--sync` con diff SHA256 entre origen y USB.
 - El calculo SHA256 se centraliza en `lap-core::crypto::compute_file_sha256` para evitar duplicacion.
-- La USB opera como fuente de verdad mediante `.provisioning_checkpoint` espejado.
+- El host opera como fuente de verdad mediante estado en `~/.lap` (checkpoints/manifests/journals por device key).
 - Continuidad de indices globales: nuevos archivos empiezan en `N+1` sin colisiones.
 - Relleno del ultimo volumen parcial antes de abrir nuevo `VOL_XX`.
+
+### R-33 Base i18n runtime (minima)
+- Selector de idioma por CLI: `--lang es|en` (global).
+- Fallback por entorno: `LAP_LANG`.
+- Primer alcance: mensajes runtime clave del binario/orquestador migrados a seleccion `es/en`.
+- No incluye localizacion completa de texto estatico de ayuda en esta fase.
 
 ### R-01-006 EntryPoint delgada + Orquestacion
 - El binario CLI (`main`) solo inicializa logging/runtime, parsea comandos y delega.
@@ -159,7 +168,7 @@ Pipeline de provision:
 	- in-place: persistencia diferida por volumen de 50
 	- estandar: persistencia por archivo
 9. `verification::pre_eject_verification`
-10. `checkpoint.finalize` + espejo de checkpoint a USB
+10. `checkpoint.finalize` en estado host-only (`~/.lap/checkpoints/<device_key>/`)
 11. `verification::safe_eject`
 
 Pipeline de refactorizacion in-situ (R-31):
