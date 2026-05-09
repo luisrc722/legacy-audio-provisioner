@@ -67,8 +67,12 @@ fn write_json_atomically(path: &Path, data: &LegacyJournal) -> Result<()> {
 }
 
 impl JournalManager {
-    pub fn load_or_create(usb_mount: &Path) -> Result<Self> {
-        let path = usb_mount.join(JOURNAL_FILENAME);
+    pub fn load_or_create_at(path: &Path) -> Result<Self> {
+        let path = path.to_path_buf();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         if path.exists() {
             let content = fs::read_to_string(&path)?;
             let data: LegacyJournal = serde_json::from_str(&content)?;
@@ -99,10 +103,27 @@ impl JournalManager {
         Ok(mgr)
     }
 
+    pub fn load_or_create(usb_mount: &Path) -> Result<Self> {
+        let path = usb_mount.join(JOURNAL_FILENAME);
+        Self::load_or_create_at(&path)
+    }
+
     pub fn save(&self) -> Result<()> {
         let mut data = self.data.clone();
         data.last_updated = Utc::now();
         write_json_atomically(&self.path, &data)
+    }
+
+    pub fn clear_from_path(path: &Path) -> Result<()> {
+        if path.exists() {
+            fs::remove_file(path)?;
+            if let Some(parent) = path.parent() {
+                if let Ok(dir) = File::open(parent) {
+                    let _ = dir.sync_all();
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn clear_from_usb(usb_mount: &Path) -> Result<()> {
@@ -272,13 +293,14 @@ mod tests {
     #[test]
     fn test_journal_transaction_lifecycle() -> Result<()> {
         let usb = TempDir::new()?;
+        let journal_file = usb.path().join("journal.json");
         let source = usb.path().join("musica/raw.mp3");
         let target = usb.path().join("VOL_01/001_raw.mp3");
 
         fs::create_dir_all(source.parent().expect("source parent"))?;
         fs::write(&source, b"audio")?;
 
-        let mut mgr = JournalManager::load_or_create(usb.path())?;
+        let mut mgr = JournalManager::load_or_create_at(&journal_file)?;
         let expected_hash = compute_file_sha256(&source)?;
         mgr.ensure_move_transaction(
             PathBuf::from("musica/raw.mp3"),
@@ -302,6 +324,7 @@ mod tests {
     #[test]
     fn test_journal_reconcile_marks_committed_from_target_hash() -> Result<()> {
         let usb = TempDir::new()?;
+        let journal_file = usb.path().join("journal.json");
         let source = usb.path().join("musica/raw.mp3");
         let target = usb.path().join("VOL_01/001_raw.mp3");
 
@@ -310,7 +333,7 @@ mod tests {
         fs::write(&source, b"audio")?;
 
         let expected_hash = compute_file_sha256(&source)?;
-        let mut mgr = JournalManager::load_or_create(usb.path())?;
+        let mut mgr = JournalManager::load_or_create_at(&journal_file)?;
         mgr.ensure_move_transaction(
             PathBuf::from("musica/raw.mp3"),
             PathBuf::from("VOL_01/001_raw.mp3"),

@@ -77,11 +77,10 @@ impl Default for ProcessedFileManifest {
 }
 
 impl ProcessedFileManifest {
-    pub fn load_or_create(usb_mount: &Path) -> Result<Self> {
-        let manifest_path = usb_mount.join(MANIFEST_FILENAME);
+    pub fn load_or_create_at(manifest_path: &Path) -> Result<Self> {
 
         if manifest_path.exists() {
-            let content = fs::read_to_string(&manifest_path)?;
+            let content = fs::read_to_string(manifest_path)?;
             let manifest: ProcessedFileManifest = match serde_json::from_str(&content) {
                 Ok(parsed) => parsed,
                 Err(e) => {
@@ -91,7 +90,7 @@ impl ProcessedFileManifest {
                         e
                     );
                     let corrupt_path = manifest_path.with_extension("corrupt");
-                    let _ = fs::rename(&manifest_path, &corrupt_path);
+                    let _ = fs::rename(manifest_path, &corrupt_path);
                     return Ok(Self::new());
                 }
             };
@@ -108,6 +107,11 @@ impl ProcessedFileManifest {
         } else {
             Ok(Self::new())
         }
+    }
+
+    pub fn load_or_create(usb_mount: &Path) -> Result<Self> {
+        let manifest_path = usb_mount.join(MANIFEST_FILENAME);
+        Self::load_or_create_at(&manifest_path)
     }
 
     /// Registrar una canción ya procesada
@@ -149,8 +153,7 @@ impl ProcessedFileManifest {
     }
 
     /// Guardar manifest a la USB de forma atómica
-    pub fn save_to_usb(&self, usb_mount: &Path) -> Result<()> {
-        let manifest_path = usb_mount.join(MANIFEST_FILENAME);
+    pub fn save_to_path(&self, manifest_path: &Path) -> Result<()> {
         let tmp_path = manifest_path.with_extension("tmp");
 
         let json_content = serde_json::to_string_pretty(self)?;
@@ -159,7 +162,7 @@ impl ProcessedFileManifest {
         tmp_file.sync_all()?;
         drop(tmp_file);
 
-        fs::rename(&tmp_path, &manifest_path)?;
+        fs::rename(&tmp_path, manifest_path)?;
 
         if let Some(parent) = manifest_path.parent() {
             if let Ok(dir) = File::open(parent) {
@@ -168,6 +171,11 @@ impl ProcessedFileManifest {
         }
 
         Ok(())
+    }
+
+    pub fn save_to_usb(&self, usb_mount: &Path) -> Result<()> {
+        let manifest_path = usb_mount.join(MANIFEST_FILENAME);
+        self.save_to_path(&manifest_path)
     }
 }
 
@@ -200,6 +208,7 @@ mod tests {
     fn test_manifest_save_and_load() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let mut manifest = ProcessedFileManifest::new();
+        let manifest_path = temp_dir.path().join("manifest_test.json");
 
         manifest.register_processed_file(
             "001_song_abcd1234.mp3".to_string(),
@@ -209,9 +218,9 @@ mod tests {
             0,
         );
 
-        manifest.save_to_usb(temp_dir.path())?;
+        manifest.save_to_path(&manifest_path)?;
 
-        let loaded = ProcessedFileManifest::load_or_create(temp_dir.path())?;
+        let loaded = ProcessedFileManifest::load_or_create_at(&manifest_path)?;
         assert_eq!(loaded.total_processed(), 1);
         assert!(loaded.is_content_already_processed(
             "abcd1234567890abcd1234567890abcd1234567890abcd1234567890abcd1234"
@@ -223,7 +232,8 @@ mod tests {
     #[test]
     fn test_manifest_load_or_create_missing_file_returns_empty() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        let loaded = ProcessedFileManifest::load_or_create(temp_dir.path())?;
+        let loaded =
+            ProcessedFileManifest::load_or_create_at(&temp_dir.path().join("missing.json"))?;
 
         assert_eq!(loaded.total_processed(), 0);
         assert!(loaded.entries_by_hash.is_empty());
@@ -260,13 +270,13 @@ mod tests {
     #[test]
     fn test_manifest_load_or_create_recovers_from_corrupt_json() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        let manifest_path = temp_dir.path().join(MANIFEST_FILENAME);
+        let manifest_path = temp_dir.path().join("manifest_corrupt.json");
         fs::write(&manifest_path, "{invalid-json")?;
 
-        let loaded = ProcessedFileManifest::load_or_create(temp_dir.path())?;
+        let loaded = ProcessedFileManifest::load_or_create_at(&manifest_path)?;
 
         assert_eq!(loaded.total_processed(), 0);
-        assert!(temp_dir.path().join(".provisioning_manifest.corrupt").exists());
+        assert!(temp_dir.path().join("manifest_corrupt.corrupt").exists());
         assert!(!manifest_path.exists());
 
         Ok(())
