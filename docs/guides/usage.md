@@ -134,6 +134,30 @@ cargo run -p lap-bin-provision -- --lang en list
 LAP_LANG=en cargo run -p lap-bin-provision -- list
 ```
 
+#### Guía rápida de idioma (i18n runtime)
+
+Reglas operativas:
+1. Idioma por bandera CLI: `--lang es|en`.
+2. Idioma por entorno: `LAP_LANG=es|en`.
+3. Precedencia: si defines ambos, gana `--lang`.
+
+Comandos recomendados:
+
+```bash
+# Forzar español en un comando puntual
+cargo run -p lap-bin-provision -- --lang es list
+
+# Forzar inglés en un comando puntual
+cargo run -p lap-bin-provision -- --lang en list
+
+# Dejar inglés como default de la sesión de shell
+export LAP_LANG=en
+cargo run -p lap-bin-provision -- list
+
+# Sobrescribir temporalmente el default del entorno
+cargo run -p lap-bin-provision -- --lang es list
+```
+
 ### Caso 3: Listar dispositivos detectados
 
 ```bash
@@ -171,6 +195,57 @@ cargo run -p lap-bin-provision -- \
 2. manifest -> USB: cada entrada del manifest debe existir en USB y coincidir en hash.
 
 Si falla alguna paridad, aborta con `INVALID_CONFIG` y no modifica la USB.
+
+Precondiciones operativas de `--strict-parity`:
+1. Debe ejecutarse junto con `--sync`.
+2. Debe existir un baseline de manifest generado por una provisión previa.
+3. Si no existe baseline, la ejecución aborta con `INVALID_CONFIG` y primero debes correr una provisión inicial sin `--strict-parity`.
+
+### Caso 6: Transformar musica en carpeta host para moverla a USB
+
+Si tu necesidad es limpiar/normalizar la coleccion en host para dejarla apta para una USB legacy, este flujo ya esta cubierto con `provision` usando `--source` apuntando al host.
+
+```bash
+cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
+  --sync \
+  --strict-parity \
+  --verbose
+```
+
+Que hace el pipeline en este escenario:
+1. Descubre audio en host (`--source`) y aplica sanitizacion de nombres ASCII legacy.
+2. Normaliza/limpia audio (FFmpeg) cuando corresponde.
+3. En modo `--sync`, evita reprocesar lo ya valido por hash.
+4. Con `--strict-parity`, aborta si host/manifest/USB no estan en paridad antes de mutar.
+
+Alcance actual: el comando transforma para destino USB dentro del mismo pipeline de provision.
+No existe hoy un subcomando separado para "pre-transformar solo host" y luego copiar manualmente fuera del flujo de `provision`.
+
+### Caso 7: USB ya procesada + host mixto (nuevos + duplicados)
+
+Cuando la USB ya tiene contenido provisionado y en host hay mezcla de canciones nuevas y duplicadas, usa incremental con validacion estricta:
+
+```bash
+cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica \
+  --sync \
+  --strict-parity \
+  --verbose
+```
+
+Resultado esperado en este escenario:
+1. Los duplicados por contenido (mismo hash ya registrado) se omiten en `--sync`.
+2. Solo se transforman y copian entradas realmente nuevas que cumplan la politica de paridad.
+3. Si hay drift entre manifest y USB, o source fuera de baseline en modo estricto, aborta antes de mutar la USB.
+
+Flujo recomendado cuando es primera corrida sobre esa USB:
+1. Ejecuta una corrida inicial sin `--strict-parity` para crear baseline.
+2. Desde la segunda corrida en adelante, habilita `--sync --strict-parity` para control estricto.
 
 ## Estructura Resultante en USB
 
