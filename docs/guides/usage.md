@@ -94,6 +94,19 @@ RUST_LOG=trace cargo run -p lap-bin-provision -- \
   -vvv
 ```
 
+### Caso 2.1: Seleccionar idioma de mensajes runtime
+
+```bash
+# Espanol (default)
+cargo run -p lap-bin-provision -- --lang es list
+
+# Ingles
+cargo run -p lap-bin-provision -- --lang en list
+
+# Alternativa por entorno
+LAP_LANG=en cargo run -p lap-bin-provision -- list
+```
+
 ### Caso 3: Listar dispositivos detectados
 
 ```bash
@@ -108,7 +121,7 @@ Si el proceso fue interrumpido (corte de luz, desconexión USB), el checkpoint a
 cargo run -p lap-bin-provision -- \
   resume \
   --usb /media/usuario/DISCO_USB \
-  --resume ~/usb_backup_cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234
+  --resume ~/.lap/backups/usb_backup_in_place__cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234_9f31a0d2
 ```
 
 El recovery compara los SHA256 reales de la USB contra el checkpoint y solo recopia los archivos faltantes o corruptos. Los archivos ya copiados correctamente **no se tocan**.
@@ -142,14 +155,21 @@ DISCO_USB/
 Antes de copiar cualquier archivo a la USB, el programa crea una copia local:
 
 ```
-~/usb_backup_cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234/
-├── 001_Cancin_1.mp3
-├── 002_song.mp3
-├── ...
-└── .provisioning_checkpoint   ← estado atómico de la sesión
+~/.lap/
+├── backups/
+│   └── usb_backup_in_place__cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234_9f31a0d2/
+│       ├── VOL_01/
+│       │   └── 001_Cancion_1.mp3
+│       └── VOL_02/
+│           └── 051_Cancion_51.mp3
+├── checkpoints/
+├── manifests/
+└── journals/
 ```
 
-El directorio de backup se crea en `$HOME` por defecto y se reutiliza por dispositivo USB. El checkpoint permite reanudar con `--resume` si ocurre una interrupción.
+El estado operativo es host-only y se crea en `~/.lap` por defecto (o `LAP_STATE_DIR`).
+La USB no recibe manifiestos, journals ni checkpoints. El nombre de estado por dispositivo usa slug + hash corto para blindar colisiones.
+En `--in-place-rebuild`, el backup preserva la estructura de carpetas relativa al mount para evitar colisiones por nombre plano.
 
 ## Reformat Seguro a FAT32 Legacy
 
@@ -228,11 +248,13 @@ Error: Not enough disk space for backup
 **Solución**: Libera espacio en tu directorio home:
 ```bash
 # Ver tamaño de backups anteriores
-du -sh ~/usb_backup*
+du -sh ~/.lap/backups/usb_backup_*
 
 # Eliminar backups antiguos si es necesario
-rm -rf ~/usb_backup_<identidad_del_dispositivo>
+rm -rf ~/.lap/backups/usb_backup_<identidad_del_dispositivo>
 ```
+
+Si el preflight no puede leer metadata de un archivo que debe respaldarse, la operación falla antes de mutar contenido.
 
 ## Rendimiento
 
