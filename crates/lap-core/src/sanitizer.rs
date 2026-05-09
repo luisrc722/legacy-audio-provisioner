@@ -86,7 +86,7 @@ pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
 /// - `<stem_truncado>`: nombre sanitizado y truncado por presupuesto de bytes
 /// - `<hash8>`: primeros 8 hex del SHA256 de contenido (unicidad)
 ///
-/// Invariante: salida ASCII y longitud <= 32 bytes.
+/// Invariante: salida ASCII y longitud == 32 bytes.
 pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &str) -> String {
     let prefix = format!("{:03}_", index);
     let hash8 = hash8_from_sha256_hex(sha256_hex);
@@ -105,6 +105,7 @@ pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &
     }
 
     let cleaned = sanitize_filename(original_stem);
+    let cleaned = strip_leading_track_prefix(&cleaned);
     let mut safe_stem = if cleaned.is_empty() {
         "audio".to_string()
     } else {
@@ -115,6 +116,10 @@ pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &
     safe_stem = safe_stem.chars().take(available_stem_len).collect();
     if safe_stem.is_empty() {
         safe_stem = "a".to_string();
+    }
+    let safe_len = safe_stem.chars().count();
+    if safe_len < available_stem_len {
+        safe_stem.push_str(&"_".repeat(available_stem_len - safe_len));
     }
 
     format!("{}{}{}", prefix, safe_stem, suffix)
@@ -135,9 +140,48 @@ fn hash8_from_sha256_hex(input: &str) -> String {
     }
 }
 
+fn strip_leading_track_prefix(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    if chars.is_empty() || !chars[0].is_ascii_digit() {
+        return input.to_string();
+    }
+
+    let mut i = 0usize;
+    while i < chars.len() && chars[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    let mut j = i;
+    while j < chars.len() && matches!(chars[j], ' ' | '-' | '_' | '.') {
+        j += 1;
+    }
+
+    if j > i && j < chars.len() {
+        chars[j..].iter().collect()
+    } else {
+        input.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_basic() {
+        assert_eq!(sanitize_filename("Canción.mp3"), "Cancin.mp3");
+        assert_eq!(sanitize_filename("track+remix=v2.mp3"), "trackremixv2.mp3");
+        assert_eq!(sanitize_filename("normal_file-01.mp3"), "normal_file-01.mp3");
+        assert_eq!(sanitize_filename("emoji🎵.mp3"), "emoji.mp3");
+    }
+
+    #[test]
+    fn test_strip_leading_track_prefix_only_when_separator_exists() {
+        assert_eq!(strip_leading_track_prefix("01-Track"), "Track");
+        assert_eq!(strip_leading_track_prefix("007__Song"), "Song");
+        assert_eq!(strip_leading_track_prefix("1979"), "1979");
+        assert_eq!(strip_leading_track_prefix("Track01"), "Track01");
+    }
 
     #[test]
     fn test_sequential_prefix_protects_extension() {
@@ -200,8 +244,34 @@ mod tests {
     fn test_hashed_legacy_name_fallback_hash_when_invalid() {
         let result = build_hashed_legacy_name("track", 3, "not-a-valid-sha");
 
-        assert_eq!(result, "003_track_00000000.mp3");
-        assert!(result.len() <= 32);
+        assert_eq!(result, "003_track___________00000000.mp3");
+        assert_eq!(result.len(), 32);
+    }
+
+    #[test]
+    fn test_hashed_legacy_name_removes_leading_track_index_artifacts() {
+        let result = build_hashed_legacy_name(
+            "01 - Cancion De Prueba",
+            4,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+
+        assert!(result.starts_with("004_Cancion"), "resultado inesperado: {}", result);
+        assert!(result.ends_with("_01234567.mp3"));
+        assert_eq!(result.len(), 32);
+    }
+
+    #[test]
+    fn test_hashed_legacy_name_always_exact_32_bytes_for_short_stems() {
+        let result = build_hashed_legacy_name(
+            "x",
+            8,
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        );
+
+        assert_eq!(result.len(), 32);
+        assert!(result.starts_with("008_x"));
+        assert!(result.ends_with("_abcdefab.mp3"));
     }
 
     #[cfg(test)]
