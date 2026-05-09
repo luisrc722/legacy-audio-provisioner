@@ -12,6 +12,7 @@
 //! - Auditoría de qué se procesó cuándo
 
 use anyhow::Result;
+use crate::crypto::compute_file_sha256;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -177,6 +178,63 @@ impl ProcessedFileManifest {
         let manifest_path = usb_mount.join(MANIFEST_FILENAME);
         self.save_to_path(&manifest_path)
     }
+
+    /// Reconstruye un baseline de manifest escaneando la USB (VOL_XX/*).
+    pub fn rebuild_from_usb(usb_mount: &Path) -> Result<Self> {
+        let mut rebuilt = Self::new();
+
+        for entry in fs::read_dir(usb_mount)? {
+            let entry = entry?;
+            let volume_path = entry.path();
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+
+            let Some(volume_name) = volume_path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !volume_name.starts_with("VOL_") {
+                continue;
+            }
+
+            for file_entry in fs::read_dir(&volume_path)? {
+                let file_entry = file_entry?;
+                if !file_entry.file_type()?.is_file() {
+                    continue;
+                }
+
+                let file_path = file_entry.path();
+                let file_name = file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("audio.mp3")
+                    .to_string();
+
+                let content_hash = compute_file_sha256(&file_path)?;
+                let size_bytes = file_entry.metadata()?.len();
+                let usb_relative_path = file_path
+                    .strip_prefix(usb_mount)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| file_name.clone());
+                let global_index = parse_global_prefix_index(&file_name).unwrap_or(0);
+
+                rebuilt.register_processed_file(
+                    file_name,
+                    content_hash,
+                    size_bytes,
+                    usb_relative_path,
+                    global_index,
+                );
+            }
+        }
+
+        Ok(rebuilt)
+    }
+}
+
+fn parse_global_prefix_index(filename: &str) -> Option<usize> {
+    let (prefix, _) = filename.split_once('_')?;
+    prefix.parse::<usize>().ok()
 }
 
 #[cfg(test)]
@@ -297,5 +355,28 @@ mod tests {
 
         assert!(manifest.last_updated >= before);
         assert!(manifest.last_updated - before < Duration::seconds(5));
+    }
+
+    #[test]
+    fn test_manifest_rebuild_from_usb_scans_volumes() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let vol_01 = temp_dir.path().join("VOL_01");
+        let vol_02 = temp_dir.path().join("VOL_02");
+        let ignored = temp_dir.path().join("misc");
+        fs::create_dir_all(&vol_01)?;
+        fs::create_dir_all(&vol_02)?;
+        fs::create_dir_all(&ignored)?;
+
+        fs::write(vol_01.join("001_track_abcd1234.mp3"), b"one")?;
+        fs::write(vol_02.join("099_song_ffff0000.mp3"), b"two")?;
+        fs::write(ignored.join("not_in_manifest.mp3"), b"three")?;
+
+        let rebuilt = ProcessedFileManifest::rebuild_from_usb(temp_dir.path())?;
+
+        assert_eq!(rebuilt.total_processed(), 2);
+        assert!(rebuilt.entries_by_name.contains_key("001_track_abcd1234.mp3"));
+        assert!(rebuilt.entries_by_name.contains_key("099_song_ffff0000.mp3"));
+
+        Ok(())
     }
 }
