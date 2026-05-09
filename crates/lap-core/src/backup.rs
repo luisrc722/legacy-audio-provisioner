@@ -36,7 +36,7 @@ impl BackupMetadata {
 
     /// Crear o reutilizar un directorio de backup estable para un dispositivo objetivo.
     pub fn new_for_target(base_dir: &Path, target_key: &str) -> Result<Self> {
-        let slug = sanitize_target_key(target_key);
+        let slug = slug_with_hash(target_key);
         let backup_dir = base_dir.join(format!("usb_backup_{}", slug));
 
         fs::create_dir_all(&backup_dir).with_context(|| {
@@ -313,30 +313,33 @@ fn compute_sha256_for_path(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-fn sanitize_target_key(target_key: &str) -> String {
-    let mut slug = String::with_capacity(target_key.len());
-    let mut last_was_separator = false;
-
-    for ch in target_key.chars() {
-        let normalized = if ch.is_ascii_alphanumeric() {
-            last_was_separator = false;
-            ch.to_ascii_lowercase()
-        } else if !last_was_separator {
-            last_was_separator = true;
-            '_'
-        } else {
+fn slug_with_hash(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut out = String::with_capacity(raw.len());
+    let mut last_sep = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_sep = false;
             continue;
-        };
-
-        slug.push(normalized);
+        }
+        if !last_sep {
+            out.push('_');
+            last_sep = true;
+        }
     }
-
-    let trimmed = slug.trim_matches('_');
-    if trimmed.is_empty() {
+    let trimmed = out.trim_matches('_');
+    let base = if trimmed.is_empty() {
         "device".to_string()
     } else {
         trimmed.to_string()
-    }
+    };
+    // Hash corto (8 hex)
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let hash = format!("{:x}", &hasher.finalize());
+    let short_hash = &hash[..8];
+    format!("{}_{}", base, short_hash)
 }
 
 /// Verificar disponibilidad de espacio en disco antes de operaciones críticas
