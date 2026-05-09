@@ -388,21 +388,35 @@ impl ProvisioningOrchestrator {
 
         self.reporter
             .info("Step 2.5: Backup-first snapshot before in-place mutations...");
-        let required_backup_bytes: u64 = plan
-            .entries
-            .iter()
-            .map(|entry| {
-                if entry.source_path.exists() {
-                    fs::metadata(&entry.source_path).map(|m| m.len()).unwrap_or(0)
-                } else if entry.destination_path.exists() {
-                    fs::metadata(&entry.destination_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0)
-                } else {
-                    0
+        let mut required_backup_bytes: u64 = 0;
+        for entry in &plan.entries {
+            let size = if entry.source_path.exists() {
+                match fs::metadata(&entry.source_path) {
+                    Ok(m) => m.len(),
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "Error obteniendo metadata de '{}': {}",
+                            entry.source_path.display(),
+                            e
+                        ));
+                    }
                 }
-            })
-            .sum();
+            } else if entry.destination_path.exists() {
+                match fs::metadata(&entry.destination_path) {
+                    Ok(m) => m.len(),
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "Error obteniendo metadata de '{}': {}",
+                            entry.destination_path.display(),
+                            e
+                        ));
+                    }
+                }
+            } else {
+                0
+            };
+            required_backup_bytes = required_backup_bytes.saturating_add(size);
+        }
         backup::check_disk_space(required_backup_bytes, &state_paths.backup_base_dir)?;
 
         let mut backup_meta =
