@@ -162,13 +162,23 @@ fn log_session_event(operation: &str, status: &str, message: &str) {
         return;
     };
 
-    let entry = serde_json::json!({
-        "timestamp": Local::now().to_rfc3339(),
-        "session_id": logger.session_id,
-        "operation": operation,
-        "status": status,
-        "message": message,
-    });
+    // Timestamp solo en SESSION_START, no en cada evento para evitar ruido en diffs
+    let entry = if operation == "SESSION_START" {
+        serde_json::json!({
+            "timestamp": Local::now().to_rfc3339(),
+            "session_id": logger.session_id,
+            "operation": operation,
+            "status": status,
+            "message": message,
+        })
+    } else {
+        serde_json::json!({
+            "session_id": logger.session_id,
+            "operation": operation,
+            "status": status,
+            "message": message,
+        })
+    };
 
     let _ = writeln!(logger.file, "{}", entry);
 }

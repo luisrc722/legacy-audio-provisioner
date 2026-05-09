@@ -80,7 +80,11 @@ fn test_16_session_log_is_created_with_json_entries() -> anyhow::Result<()> {
     assert!(entries
         .iter()
         .any(|entry| entry["operation"] == "COMMAND_END"));
-    assert!(entries.iter().all(|entry| entry.get("timestamp").is_some()));
+    // Timestamp solo en SESSION_START para logs determinísticos sin ruido
+    assert!(entries
+        .iter()
+        .find(|entry| entry["operation"] == "SESSION_START")
+        .is_some_and(|entry| entry.get("timestamp").is_some()));
     assert!(entries
         .iter()
         .all(|entry| entry.get("session_id").is_some()));
