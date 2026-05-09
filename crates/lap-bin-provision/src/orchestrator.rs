@@ -1818,7 +1818,20 @@ impl ProvisioningOrchestrator {
         usb_mount: &Path,
         manifest_path: &Path,
     ) -> Result<()> {
-        let processed_manifest = manifest::ProcessedFileManifest::load_or_create_at(manifest_path)?;
+        let mut processed_manifest =
+            manifest::ProcessedFileManifest::load_or_create_at(manifest_path)?;
+
+        if processed_manifest.total_processed() == 0 {
+            let rebuilt = manifest::ProcessedFileManifest::rebuild_from_usb(usb_mount)?;
+            if rebuilt.total_processed() > 0 {
+                rebuilt.save_to_path(manifest_path)?;
+                processed_manifest = rebuilt;
+                log::warn!(
+                    "Strict parity baseline manifest reconstruido por escaneo USB: {} entradas.",
+                    processed_manifest.total_processed()
+                );
+            }
+        }
 
         if processed_manifest.total_processed() == 0 {
             return Err(anyhow::anyhow!(ProvisioningError::InvalidConfig {
