@@ -35,7 +35,7 @@ pub fn state_root_dir() -> Result<PathBuf> {
 
 pub fn paths_for_device(device_key: &str) -> Result<DeviceStatePaths> {
     let root_dir = state_root_dir()?;
-    let slug = sanitize_key(device_key);
+    let slug = slug_with_hash(device_key);
 
     let backup_base_dir = root_dir.join("backups");
     let checkpoints_root = root_dir.join("checkpoints");
@@ -60,27 +60,31 @@ pub fn paths_for_device(device_key: &str) -> Result<DeviceStatePaths> {
     })
 }
 
-fn sanitize_key(raw: &str) -> String {
+fn slug_with_hash(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
     let mut out = String::with_capacity(raw.len());
     let mut last_sep = false;
-
     for ch in raw.chars() {
         if ch.is_ascii_alphanumeric() {
             out.push(ch.to_ascii_lowercase());
             last_sep = false;
             continue;
         }
-
         if !last_sep {
             out.push('_');
             last_sep = true;
         }
     }
-
     let trimmed = out.trim_matches('_');
-    if trimmed.is_empty() {
+    let base = if trimmed.is_empty() {
         "device".to_string()
     } else {
         trimmed.to_string()
-    }
+    };
+    // Hash corto (8 hex)
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let hash = format!("{:x}", &hasher.finalize());
+    let short_hash = &hash[..8];
+    format!("{}_{}", base, short_hash)
 }
