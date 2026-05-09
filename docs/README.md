@@ -54,6 +54,7 @@ Politica de rutas de codigo:
 - `docs/testing/pbt_and_e2e_test_plan.md`
 - `docs/testing/objective_audit_rubric.md`
 - `docs/testing/audit_scorecard_2026-05-09.md`
+- `docs/testing/evidence/README.md` (politica de evidencia historica)
 
 ### Guias
 

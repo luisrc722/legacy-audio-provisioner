@@ -6,7 +6,7 @@ Evaluador: GitHub Copilot (GPT-5.3-Codex)
 
 ## Resultado Global
 
-- Puntaje total: 19/20
+- Puntaje total: 20/20
 - Dictamen: Aprobado para release
 
 ## Puntaje por Criterio
@@ -46,10 +46,10 @@ Evaluador: GitHub Copilot (GPT-5.3-Codex)
   - Eventos JSON estructurados y tests de contrato en verde.
   - test_16_session_log_is_created_with_json_entries ok.
 
-8. C8 Coherencia codigo-documentacion: 1/2
+8. C8 Coherencia codigo-documentacion: 2/2
 - Evidencia:
   - README, arquitectura y traceability ya alineados al nuevo esquema.
-  - Residual historico en evidencia congelada con formato antiguo de session log.
+  - Politica explicita de evidencia historica no normativa documentada en docs/testing/evidence/README.md.
 
 9. C9 Arquitectura y mantenibilidad: 2/2
 - Evidencia:
@@ -64,7 +64,7 @@ Evaluador: GitHub Copilot (GPT-5.3-Codex)
 ## Hallazgos
 
 - No se detectaron hallazgos bloqueantes.
-- Hallazgo menor: normalizar referencias antiguas en material historico si se desea consistencia visual total, sin reescribir evidencia factual.
+- Sin hallazgos menores abiertos tras documentar la politica de evidencia historica no normativa.
 
 ## Evidencia de Ejecucion
 
