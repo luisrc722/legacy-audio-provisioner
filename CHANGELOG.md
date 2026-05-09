@@ -4,30 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Sin cambios publicados todavia.
+
+## [0.4.0] - 2026-05-09
+
 ### Added
-- Session-scoped structured logging in `lap-bin-provision` with JSON-lines output (`provisioning.log`) and per-operation records.
-- Workspace-runnable integration suite at `crates/lap-core/tests/integration_test.rs` with adversarial coverage for `R-05`:
-  - `test_11_path_traversal_is_rejected`
-  - `test_12_shell_injection_filename_is_rejected`
-  - `test_13_metadata_bomb_is_rejected`
-- Fault-injected integration coverage for `R-02` edge cases:
-  - `test_14_preflight_rw_probe_fails_fast_on_read_only_target`
-  - `test_15_checkpoint_enospc_maps_to_storage_full`
-- Integration coverage for `R-01-005` structured logging:
-  - `test_16_session_log_is_created_with_json_entries`
-- Integration coverage for recovery and final verification:
-  - `test_17_execute_recovery_restores_only_invalid_entries`
-  - `test_18_pre_eject_verification_accepts_valid_topology_and_hashes`
+- Preflight `--strict-parity` para provision incremental, con validacion source -> manifest y manifest -> USB antes de mutar contenido.
+- Cobertura operativa en guia para escenarios host -> USB, USB vacia/nueva y USB ya procesada con host mixto.
+- Guia rapida de idioma runtime (`--lang`, `LAP_LANG`) con precedencia explicita.
 
 ### Changed
-- QA runbooks and release gates now reference workspace commands:
-  - `cargo test --workspace`
-  - `cargo test -p lap-core --test integration_test`
-- Integration coverage for post-write cryptographic verification:
-  - `test_19_verify_file_integrity_detects_post_write_corruption`
-- Baseline test count updated to `75/75` (53 unit + 20 integration + 2 doc).
+- Logging estable por dispositivo/operacion:
+  - USB especifica: `~/.lap/logs/device_<slug_hash>.log`
+  - Operaciones sin USB (`list`): `~/.lap/logs/op_<slug_hash>.log`
+- Session IDs deterministicas basadas en identidad estable en lugar de timestamp+PID.
+- `timestamp` de evento solo en `SESSION_START` para reducir ruido en diffs y auditoria.
 
-## [1.1.0] - 2026-03-16
+### Fixed
+- Reduccion de ruido temporal en logs estructurados por ejecucion.
+- Higiene del repositorio: `.obsidian/` agregado a `.gitignore` para excluir metadatos locales.
+
+## [0.3.0] - 2026-03-16
 
 ### Fixed
 - Enforced strict `--dry-run` semantics with zero writes to USB and local disk.
