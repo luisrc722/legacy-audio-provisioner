@@ -33,7 +33,7 @@ Validar el comportamiento integrado del motor sobre los flujos críticos de Fase
 | `test_13_metadata_bomb_is_rejected` | `R-05-003` | Adversarial | Rechaza payload de metadata > 5MB | ✅ PASS |
 | `test_14_preflight_rw_probe_fails_fast_on_read_only_target` | `R-02-005` | Inyección de fallos | Pre-flight `.fat32_dirty_test` aborta antes del pipeline sobre target read-only | ✅ PASS |
 | `test_15_checkpoint_enospc_maps_to_storage_full` | `R-02-006` | Inyección de fallos | Escritura atómica del checkpoint mapea ENOSPC a `ENOSPC_ERROR` | ✅ PASS |
-| `test_16_session_log_is_created_with_json_entries` | `R-01-005` | Integración / observabilidad | Crea `provisioning.log` por sesión con entradas JSON válidas | ✅ PASS |
+| `test_16_session_log_is_created_with_json_entries` | `R-01-005` | Integración / observabilidad | Crea log estructurado por dispositivo (o por operación en fallback) con entradas JSON válidas | ✅ PASS |
 | `test_17_execute_recovery_restores_only_invalid_entries` | `R-09-008` | Integración / recuperación | Reanuda desde checkpoint, recupera solo la entrada inválida y preserva la válida | ✅ PASS |
 | `test_18_pre_eject_verification_accepts_valid_topology_and_hashes` | `R-09-010` | Integración / subconjunto de verificación | Valida topología `VOL_XX` e integridad SHA256 antes del eject | ✅ PASS |
 | `test_19_verify_file_integrity_detects_post_write_corruption` | `R-06-002` | Integración / criptografía | Acepta archivo íntegro; detecta hash mismatch tras corrupción post-escritura | ✅ PASS |

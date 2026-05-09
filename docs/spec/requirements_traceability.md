@@ -79,7 +79,7 @@ Este repositorio opera bajo **trazabilidad bidireccional**:
 | R-01-002 | N/A | IPC JSON Lines | Los componentes deben emitir eventos JSON legibles por máquina para integración/debug. | `crates/lap-core/src/ipc.rs` |
 | R-01-003 | R-04 | Parseo de Argumentos CLI | Parseo robusto de comandos con ayuda autogenerada y subcomandos. | `crates/lap-bin-provision/src/main.rs`, `crates/lap-bin-ingest/src/main.rs` |
 | R-01-004 | R-12 (SDD) | Modo Dry Run | El flag `--dry-run` ejecuta el pipeline completo en simulación: calcula plan, emite eventos, no escribe nada. | `crates/lap-bin-provision/src/orchestrator.rs` (`provision_usb`, `dry_run_no_backup`) |
-| R-01-005 | R-14 (SDD, Fase 2) | Logging Estructurado | Emitir archivo de log estructurado con timestamp (`provisioning.log`) por sesión con registros por operación. | `crates/lap-bin-provision/src/main.rs` (`init_session_logger`, `log_session_event`) |
+| R-01-005 | R-14 (SDD, Fase 2) | Logging Estructurado | Emitir archivo de log estructurado por dispositivo (cuando hay `--usb`) o por operación (cuando no hay USB explícita), con timestamp por evento. | `crates/lap-bin-provision/src/main.rs` (`init_session_logger`, `log_session_event`) |
 | R-01-006 | N/A | EntryPoint Delgada y Orquestación | El binario CLI debe limitarse a bootstrap + dispatch y delegar el flujo de negocio a una capa de orquestación dedicada. | `crates/lap-bin-provision/src/main.rs`, `crates/lap-bin-provision/src/orchestrator.rs` |
 | R-01-007 | N/A | Abstracción de Progreso | La capa de negocio reporta avance/estado vía trait para soportar implementaciones CLI/JSON sin acoplamiento. | `crates/lap-bin-provision/src/reporter.rs` |
 

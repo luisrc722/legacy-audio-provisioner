@@ -34,7 +34,7 @@ Validar HW -> Descubrir -> Backup -> Sanitizar/Planificar -> Normalizar+Copia ->
 
 **Modulo:** `crates/lap-core/src/backup.rs`
 
-- Crea backup local timestamped.
+- Crea backup local estable por dispositivo (slug + hash).
 - Copia con hashing SHA256 en streaming.
 - Verifica espacio con `statvfs` antes de continuar.
 

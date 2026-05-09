@@ -202,7 +202,7 @@ stateDiagram-v2
 ### Escenario 1: Operación Normal sin Interrupciones
 
 ```
-1. BackupMetadata::new_with_base_dir() crea ~/usb_backup_YYYYMMDD/
+1. BackupMetadata inicializa un directorio estable por dispositivo en host (ej. ~/.lap/backups/usb_backup_<device_slug_hash>/)
 2. CheckpointManager::new() crea .provisioning_checkpoint (vacío, atómico)
 3. Para cada archivo:
    a. record_file_start()   → guarda InProgress + SHA256 del backup
@@ -217,7 +217,7 @@ stateDiagram-v2
 ```
 1. El checkpoint atómico garantiza el último estado consistente en disco
 2. El usuario reconecta el USB y ejecuta:
-   legacy-audio-provisioner --usb /media/USB --resume ~/usb_backup_20260315_1430/
+    legacy-audio-provisioner --usb /media/USB --resume ~/.lap/backups/usb_backup_<device_slug_hash>/
 3. CheckpointManager::load_from_disk() lee el estado
 4. RecoveryManager::execute_recovery() itera sobre archivos InProgress/Failed:
    - Calcula SHA256 real del archivo en USB
@@ -244,13 +244,13 @@ stateDiagram-v2
   "version": 1,
   "created_at": "2026-03-15T14:30:45.123456Z",
   "last_updated": "2026-03-15T14:35:12.654321Z",
-  "backup_dir": "/home/user/usb_backup_20260315_1430",
+    "backup_dir": "/home/user/.lap/backups/usb_backup_music_disk_a1b2c3d4",
   "usb_mount": "/media/user/DISK",
   "audio_source": "/home/user/Music",
   "total_files": 100,
   "last_completed_index": 45,
   "operation_status": "InProgress",
-  "session_id": "session_20260315_143045",
+    "session_id": "checkpoint_9f04ac88d0be",
   "processed_files": {
     "0": {
       "original_path": "/home/user/Music/song1.mp3",
