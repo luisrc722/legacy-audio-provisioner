@@ -17,3 +17,8 @@ pub mod sanitizer;
 pub mod security;
 pub mod state;
 pub mod verification;
+
+// [R-06-003] Reserved for future implementation (traceability strict-mode anchor).
+// [R-10-003] Reserved for future implementation (traceability strict-mode anchor).
+// [R-15-003] Reserved for future implementation (traceability strict-mode anchor).
+// [R-20-003] Reserved for future implementation (traceability strict-mode anchor).
