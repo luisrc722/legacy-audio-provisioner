@@ -9,6 +9,7 @@ use crate::error::ProvisioningError;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use log::info;
+use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -62,7 +63,7 @@ impl CheckpointData {
         audio_source: PathBuf,
         total_files: usize,
     ) -> Self {
-        let session_id = format!("session_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        let session_id = deterministic_checkpoint_session_id(&backup_dir, &usb_mount, &audio_source);
         CheckpointData {
             version: CHECKPOINT_VERSION,
             created_at: Utc::now(),
@@ -94,6 +95,34 @@ impl CheckpointData {
     pub fn is_recoverable(&self) -> bool {
         self.operation_status == OperationStatus::InProgress && !self.processed_files.is_empty()
     }
+}
+
+fn deterministic_checkpoint_session_id(
+    backup_dir: &Path,
+    usb_mount: &Path,
+    audio_source: &Path,
+) -> String {
+    let key = format!(
+        "{}|{}|{}",
+        stable_path_key(backup_dir),
+        stable_path_key(usb_mount),
+        stable_path_key(audio_source)
+    );
+    format!("checkpoint_{}", short_hash(&key))
+}
+
+fn stable_path_key(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn short_hash(raw: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    hash[..12].to_string()
 }
 
 pub struct CheckpointManager {

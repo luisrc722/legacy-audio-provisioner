@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use crate::crypto::compute_file_sha256;
+use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Write;
@@ -88,11 +89,7 @@ impl JournalManager {
 
         let data = LegacyJournal {
             version: JOURNAL_VERSION,
-            session_id: format!(
-                "journal_{}_{}",
-                Local::now().format("%Y%m%d_%H%M%S"),
-                std::process::id()
-            ),
+            session_id: deterministic_journal_session_id(&path),
             created_at: Utc::now(),
             last_updated: Utc::now(),
             transactions: Vec::new(),
@@ -283,6 +280,18 @@ impl JournalManager {
                 .iter()
                 .all(|t| t.status == TransactionStatus::Committed)
     }
+}
+
+fn deterministic_journal_session_id(path: &Path) -> String {
+    let key = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    format!("journal_{}", &hash[..12])
 }
 
 #[cfg(test)]

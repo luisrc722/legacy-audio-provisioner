@@ -5,7 +5,7 @@ use log::info;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use lap_core::error::ProvisioningError;
@@ -30,9 +30,9 @@ struct SessionLogger {
 
 /// [R-01-005] Logging Estructurado
 /// Precondicion: existe un directorio de logs del host resoluble por entorno o fallback.
-/// Postcondicion: se crea una sesion con `provisioning.log` en formato JSON-lines auditable.
+/// Postcondicion: se crea o reutiliza un log estable por dispositivo/operacion en formato JSON-lines auditable.
 /// Invariante: cada ejecucion registra eventos `SESSION_START` y `COMMAND_*` con `session_id` consistente.
-fn init_session_logger() -> Result<PathBuf> {
+fn init_session_logger(command: &Commands) -> Result<PathBuf> {
     let base_dir = if let Ok(custom) = std::env::var("LAP_LOG_DIR") {
         PathBuf::from(custom)
     } else {
@@ -46,20 +46,36 @@ fn init_session_logger() -> Result<PathBuf> {
         )
     })?;
 
-    let session_id = format!(
-        "session_{}_{}",
-        Local::now().format("%Y%m%d_%H%M%S"),
-        std::process::id()
-    );
-    let session_dir = base_dir.join(&session_id);
-    fs::create_dir_all(&session_dir).with_context(|| {
-        format!(
-            "No se pudo crear directorio de sesion '{}'",
-            session_dir.display()
-        )
-    })?;
+    if let Some(device_path) = device_path_from_command(command) {
+        let device_key = stable_device_key(device_path);
+        let device_slug = slug_with_hash(&device_key);
+        let log_path = base_dir.join(format!("device_{}.log", device_slug));
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .with_context(|| format!("No se pudo abrir log '{}'", log_path.display()))?;
 
-    let log_path = session_dir.join("provisioning.log");
+        let logger = SessionLogger {
+            session_id: format!("device_{}", device_slug),
+            log_path: log_path.clone(),
+            file,
+        };
+
+        let _ = SESSION_LOGGER.set(Mutex::new(logger));
+
+        log_session_event(
+            "SESSION_START",
+            "OK",
+            &format!("Inicio de sesion de provisioning | device={}", device_path.display()),
+        );
+
+        return Ok(log_path);
+    }
+
+    let operation_key = command_log_key(command);
+    let operation_slug = slug_with_hash(&operation_key);
+    let log_path = base_dir.join(format!("op_{}.log", operation_slug));
     let file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -67,7 +83,7 @@ fn init_session_logger() -> Result<PathBuf> {
         .with_context(|| format!("No se pudo abrir log '{}'", log_path.display()))?;
 
     let logger = SessionLogger {
-        session_id,
+        session_id: format!("op_{}", operation_slug),
         log_path: log_path.clone(),
         file,
     };
@@ -77,6 +93,64 @@ fn init_session_logger() -> Result<PathBuf> {
     log_session_event("SESSION_START", "OK", "Inicio de sesion de provisioning");
 
     Ok(log_path)
+}
+
+fn command_log_key(command: &Commands) -> String {
+    match command {
+        Commands::List => "list".to_string(),
+        Commands::Scan { usb: None } => "scan_auto".to_string(),
+        _ => format!("{:?}", command),
+    }
+}
+
+fn device_path_from_command(command: &Commands) -> Option<&Path> {
+    match command {
+        Commands::Provision { usb, .. }
+        | Commands::Format { usb, .. }
+        | Commands::Resume { usb, .. }
+        | Commands::Ingest { usb, .. }
+        | Commands::Refactor { usb, .. } => Some(usb.as_path()),
+        Commands::Scan { usb: Some(usb) } => Some(usb.as_path()),
+        _ => None,
+    }
+}
+
+fn stable_device_key(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn slug_with_hash(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut out = String::with_capacity(raw.len());
+    let mut last_sep = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_sep = false;
+            continue;
+        }
+        if !last_sep {
+            out.push('_');
+            last_sep = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('_');
+    let base = if trimmed.is_empty() {
+        "device".to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    let short_hash = &hash[..8];
+    format!("{}_{}", base, short_hash)
 }
 
 fn log_session_event(operation: &str, status: &str, message: &str) {
@@ -230,7 +304,7 @@ fn main() -> std::result::Result<(), ProvisioningError> {
     let cli = Cli::parse();
     init_locale(Some(&cli.lang));
 
-    if let Ok(path) = init_session_logger() {
+    if let Ok(path) = init_session_logger(&cli.command) {
         eprintln!(
             "{}: {}",
             tr("Log de sesion", "Session log"),

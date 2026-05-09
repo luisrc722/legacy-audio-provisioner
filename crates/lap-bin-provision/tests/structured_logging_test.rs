@@ -13,7 +13,11 @@ fn find_provisioning_log(root: &Path) -> Option<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.file_name().and_then(|name| name.to_str()) == Some("provisioning.log") {
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "provisioning.log" || name.starts_with("device_"))
+            {
                 return Some(path);
             }
         }
@@ -44,6 +48,16 @@ fn test_16_session_log_is_created_with_json_entries() -> anyhow::Result<()> {
     );
 
     let log_path = find_provisioning_log(log_root.path()).expect("provisioning.log not found");
+    let file_name = log_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    assert!(
+        file_name.starts_with("device_"),
+        "expected per-device log file, got {}",
+        file_name
+    );
+
     let content = fs::read_to_string(&log_path)?;
     let lines: Vec<&str> = content
         .lines()
