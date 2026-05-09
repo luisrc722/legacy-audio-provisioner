@@ -109,7 +109,7 @@ Por defecto se usa `~/.lap` (o `LAP_STATE_DIR` si está definido).
 | Checkpoint | `~/.lap/checkpoints/<device_key>/.provisioning_checkpoint` |
 | Manifest dedupe | `~/.lap/manifests/manifest_<device_key>.json` |
 | Journal transaccional | `~/.lap/journals/journal_<device_key>.json` |
-| Logs de sesión | `~/.lap/logs/<session_id>/provisioning.log` |
+| Logs de sesión/dispositivo | `~/.lap/logs/device_<device_slug_hash>.log` (comandos con `--usb`) o `~/.lap/logs/op_<operation_slug_hash>.log` (sin USB explícita) |
 
 ### En USB
 
