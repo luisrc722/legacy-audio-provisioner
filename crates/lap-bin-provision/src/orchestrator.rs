@@ -941,8 +941,11 @@ impl ProvisioningOrchestrator {
                 total_processed: 0,
                 total_skipped: skipped_existing,
                 elapsed_time_seconds: start.elapsed().as_secs(),
-                message: "Sincronizacion completada: no habia archivos nuevos ni huérfanos por aislar."
-                    .to_string(),
+                message: tr(
+                    "Sincronizacion completada: no habia archivos nuevos ni huerfanos por aislar.",
+                    "Synchronization completed: there were no new files or orphan files to isolate.",
+                )
+                .to_string(),
             }
             .emit(self.json_mode);
             return Ok(());
@@ -1203,18 +1206,29 @@ impl ProvisioningOrchestrator {
             }
 
             let provision_candidates = audio_files.len().saturating_sub(move_candidates);
-            self.reporter.info("\n=== R-33 Topology Plan ===");
-            self.reporter
-                .info(&format!("[SKIP] {} files already compliant", skipped_existing));
-            self.reporter
-                .info(&format!("[MOVE] {} files for in-place reindex", move_candidates));
             self.reporter.info(&format!(
-                "[PROVISION] {} files need encode/copy",
-                provision_candidates
+                "\n{}",
+                tr("=== Plan Topologico R-33 ===", "=== R-33 Topology Plan ===")
             ));
             self.reporter.info(&format!(
-                "[QUARANTINE] {} orphan/untracked files",
-                untracked_in_target.len()
+                "[SKIP] {} {}",
+                skipped_existing,
+                tr("archivos ya conformes", "files already compliant")
+            ));
+            self.reporter.info(&format!(
+                "[MOVE] {} {}",
+                move_candidates,
+                tr("archivos para reindexado in-place", "files for in-place reindex")
+            ));
+            self.reporter.info(&format!(
+                "[PROVISION] {} {}",
+                provision_candidates,
+                tr("archivos requieren encode/copy", "files need encode/copy")
+            ));
+            self.reporter.info(&format!(
+                "[QUARANTINE] {} {}",
+                untracked_in_target.len(),
+                tr("archivos huerfanos/untracked", "orphan/untracked files")
             ));
         }
 
