@@ -12,9 +12,11 @@ use lap_core::error::ProvisioningError;
 use lap_core::ipc::IpcEvent;
 use lap_core::state;
 
+mod messages;
 mod orchestrator;
 mod reporter;
 
+use messages::{init_locale, tr};
 use orchestrator::ProvisioningOrchestrator;
 use reporter::create_reporter;
 
@@ -130,6 +132,16 @@ struct Cli {
         global = true
     )]
     json: bool,
+
+    #[arg(
+        long,
+        value_name = "LANG",
+        default_value = "es",
+        value_parser = ["es", "en"],
+        help = "Idioma de mensajes runtime: es|en",
+        global = true
+    )]
+    lang: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -216,9 +228,14 @@ enum Commands {
 
 fn main() -> std::result::Result<(), ProvisioningError> {
     let cli = Cli::parse();
+    init_locale(Some(&cli.lang));
 
     if let Ok(path) = init_session_logger() {
-        eprintln!("Session log: {}", path.display());
+        eprintln!(
+            "{}: {}",
+            tr("Log de sesion", "Session log"),
+            path.display()
+        );
     }
 
     let log_level = match cli.verbose {
@@ -230,9 +247,10 @@ fn main() -> std::result::Result<(), ProvisioningError> {
     std::env::set_var("RUST_LOG", log_level);
     env_logger::init();
 
-    info!("=== Legacy Audio Provisioner ===");
+    info!("{}", tr("=== Legacy Audio Provisioner ===", "=== Legacy Audio Provisioner ==="));
     info!(
-        "Version {} | Spec-Driven Development",
+        "{} {} | Spec-Driven Development",
+        tr("Version", "Version"),
         env!("CARGO_PKG_VERSION")
     );
 
@@ -278,7 +296,8 @@ fn main() -> std::result::Result<(), ProvisioningError> {
                     .canonicalize()
                     .map_err(|e| ProvisioningError::InvalidConfig {
                         details: format!(
-                            "No se pudo resolver la ruta USB '{}': {}",
+                            "{} '{}': {}",
+                            tr("No se pudo resolver la ruta USB", "Could not resolve USB path"),
                             usb.display(),
                             e
                         ),
@@ -287,7 +306,11 @@ fn main() -> std::result::Result<(), ProvisioningError> {
                     .canonicalize()
                     .map_err(|e| ProvisioningError::InvalidConfig {
                         details: format!(
-                            "No se pudo resolver la ruta de origen '{}': {}",
+                            "{} '{}': {}",
+                            tr(
+                                "No se pudo resolver la ruta de origen",
+                                "Could not resolve source path"
+                            ),
                             source.display(),
                             e
                         ),
@@ -296,7 +319,11 @@ fn main() -> std::result::Result<(), ProvisioningError> {
                 if usb_can != source_can {
                     return Err(ProvisioningError::InvalidConfig {
                         details: format!(
-                            "Con --in-place-rebuild, --source debe apuntar al mismo mount USB ('{}' != '{}').",
+                            "{} ('{}' != '{}').",
+                            tr(
+                                "Con --in-place-rebuild, --source debe apuntar al mismo mount USB",
+                                "With --in-place-rebuild, --source must point to the same USB mount"
+                            ),
                             usb_can.display(),
                             source_can.display()
                         ),
@@ -349,10 +376,18 @@ fn main() -> std::result::Result<(), ProvisioningError> {
         log_session_event(
             "COMMAND_END",
             "OK",
-            &format!("Ejecucion completada. Log: {}", path.display()),
+            &format!(
+                "{}: {}",
+                tr("Ejecucion completada. Log", "Execution completed. Log"),
+                path.display()
+            ),
         );
     } else {
-        log_session_event("COMMAND_END", "OK", "Ejecucion completada");
+        log_session_event(
+            "COMMAND_END",
+            "OK",
+            tr("Ejecucion completada", "Execution completed"),
+        );
     }
 
     Ok(())
