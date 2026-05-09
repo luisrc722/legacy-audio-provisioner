@@ -409,9 +409,9 @@ impl ProvisioningOrchestrator {
             backup::BackupMetadata::new_for_target(&state_paths.backup_base_dir, &in_place_key)?;
         for entry in &plan.entries {
             if entry.source_path.exists() {
-                backup_meta.backup_file(&entry.source_path)?;
+                backup_meta.backup_file_preserving_tree(&entry.source_path, usb_mount)?;
             } else if entry.destination_path.exists() {
-                backup_meta.backup_file(&entry.destination_path)?;
+                backup_meta.backup_file_preserving_tree(&entry.destination_path, usb_mount)?;
             }
         }
         if !backup_meta.verify_backup()? {
