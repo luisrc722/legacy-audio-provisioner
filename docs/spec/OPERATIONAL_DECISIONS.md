@@ -27,10 +27,17 @@ Gobernanza documental activa: ver `docs/adr/0006-docs-as-code-governance.md`.
 - **Regla**:
   - calcular `max_existing_index` en USB/checkpoint,
   - comenzar nuevos archivos desde `max + 1`,
+  - escribir nuevos nombres con prefijo de 4 digitos (`{:04}`),
+  - aceptar lectura de prefijos `\d{3}` y `\d{4}` en modo transición,
   - rellenar último volumen parcial antes de abrir uno nuevo.
 - **Justificación**:
   - previene colisiones de nombres,
-  - mantiene orden reproducible para firmwares que leen por orden FAT.
+  - mantiene orden reproducible para firmwares que leen por orden FAT,
+  - evita quiebre de orden al superar 999 archivos (`0999` -> `1000`).
+
+- **Validación de transición**:
+  - si se detecta mezcla de prefijos 3/4 dígitos en la USB, emitir advertencia operativa,
+  - recomendar normalización/reindexación completa a 4 dígitos para evitar saltos de orden en estéreos legacy.
 
 ---
 
@@ -89,6 +96,75 @@ Gobernanza documental activa: ver `docs/adr/0006-docs-as-code-governance.md`.
   - mejora verificabilidad y visibilidad para el usuario al terminar,
   - evita confusión operativa por desmontaje/power-off inmediato,
   - conserva opción de seguridad estricta cuando se requiere extracción inmediata.
+
+---
+
+## AD-11: Inversión del pipeline de protección de nombres
+
+- **Decisión**:
+  - ejecutar sanitización/truncado antes de validaciones de seguridad sobre nombre final,
+  - evaluar el filtro defensivo sólo sobre datos normalizados.
+- **Justificación**:
+  - reduce falsos positivos por entradas "sucias" no canónicas,
+  - preserva señales reales de riesgo sin bloquear casos válidos.
+
+---
+
+## AD-12: Streaming incremental como política de memoria
+
+- **Decisión**:
+  - evitar materialización eager del source completo en sync incremental,
+  - recorrer source en streaming para comparar contra índice hash objetivo.
+- **Justificación**:
+  - uso de RAM acotado y estable en colecciones grandes,
+  - mejor latencia percibida en telemetría/progreso.
+
+---
+
+## AD-13: Sanitización inteligente no destructiva
+
+- **Decisión**:
+  - transliteración ASCII en lugar de borrado ciego de UTF-8,
+  - poda de junk por regex (`+++`, `0000`, tags promocionales),
+  - normalización de separadores y colapso de runs a `_`.
+- **Justificación**:
+  - nombres legibles para usuario,
+  - compatibilidad FAT32 sin pérdida innecesaria de semántica.
+
+---
+
+## AD-14: Idempotencia y source-of-truth por hash en sync
+
+- **Decisión**:
+  - identidad incremental por hash8 embebido en nombre legacy,
+  - omitir (`SKIP`) contenido ya presente por hash aunque cambie ubicación,
+  - impedir doble prefijo/doble saneamiento sobre nombres ya procesados.
+- **Justificación**:
+  - elimina duplicados por reprocesamiento,
+  - garantiza convergencia entre corridas repetidas.
+
+---
+
+## AD-15: Escalabilidad de prefijo global a 4 dígitos
+
+- **Decisión**:
+  - escritura nueva en formato `NNNN_` (`{:04}`),
+  - continuidad desde high-water mark detectado en USB,
+  - compatibilidad temporal de lectura para `\d{3}` y `\d{4}`.
+- **Justificación**:
+  - evita quiebre de orden lexicográfico al superar 999 archivos,
+  - habilita transición sin migración forzosa inmediata.
+
+---
+
+## AD-16: Topología `VOL_XX` con índice global canónico
+
+- **Decisión**:
+  - mantener agrupación por volúmenes para límites FAT32,
+  - usar el índice global en nombre como orden final de reproducción.
+- **Justificación**:
+  - respeta restricciones de firmware legacy por carpeta,
+  - conserva orden reproducible entre volúmenes.
 
 ---
 
@@ -155,7 +231,7 @@ flowchart TD
     B --> C[Escanear hashes en USB]
     C --> D{Existe el hash en USB?}
     D -- Si --> E[Omitir]
-    D -- No --> F[Asignar siguiente indice global]
+    D -- No --> F[Asignar siguiente indice global con padding 4 digitos]
     F --> G[Planear asignacion VOL_XX]
     G --> H[Normalizar + Escribir]
     H --> I[Actualizar checkpoint]
