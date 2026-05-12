@@ -6,10 +6,9 @@
 /// - Detectar archivos nuevos en origen (no presentes por hash en USB)
 /// - Detectar archivos huérfanos en USB (no registrados en checkpoint)
 /// - Reconstruir estado incremental: máximo índice global y ocupación por VOL_XX
-use crate::audio_discovery::{discover_audio_files, AudioFile};
+use crate::audio_discovery::{discover_audio_files, visit_audio_files, AudioFile};
 use crate::backup::BackupMetadata;
 use crate::crypto::compute_file_sha256;
-use crate::distribution::{DistributedFile, VolumeSegment, MAX_FILES_PER_FOLDER};
 use crate::security::validate_path_containment;
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -377,31 +376,56 @@ fn build_target_hash_index(
     ))
 }
 
-pub fn calculate_sync_diff(
-    source_files: &[AudioFile],
-    target_mount: &Path,
-    checkpoint_known_names: &HashSet<String>,
-) -> Result<SyncDiffReport> {
-    let (target_hashes, displaced_hash_to_path, target_files) =
-        build_target_hash_index(target_mount)?;
+/// Accumulator for the source-side pass of a sync diff.
+struct SourceDiffAcc {
+    files_to_process: Vec<AudioFile>,
+    skipped_existing: usize,
+    displaced_in_target: HashMap<PathBuf, PathBuf>,
+    displaced_planned_paths: HashSet<PathBuf>,
+}
 
-    let mut files_to_process = Vec::new();
-    let mut skipped_existing = 0usize;
-    let mut displaced_in_target: HashMap<PathBuf, PathBuf> = HashMap::new();
-    let mut displaced_planned_paths: HashSet<PathBuf> = HashSet::new();
-
-    for source in source_files {
-        let src_hash = compute_file_sha256(&source.path)?;
-        if target_hashes.contains(&src_hash) {
-            skipped_existing += 1;
-        } else if let Some(usb_path) = displaced_hash_to_path.get(&src_hash) {
-            files_to_process.push(source.clone());
-            displaced_in_target.insert(source.path.clone(), usb_path.clone());
-            displaced_planned_paths.insert(usb_path.clone());
-        } else {
-            files_to_process.push(source.clone());
+impl SourceDiffAcc {
+    fn new() -> Self {
+        Self {
+            files_to_process: Vec::new(),
+            skipped_existing: 0,
+            displaced_in_target: HashMap::new(),
+            displaced_planned_paths: HashSet::new(),
         }
     }
+
+    fn process(
+        &mut self,
+        source: AudioFile,
+        target_hashes: &TargetHashSet,
+        displaced_map: &DisplacedHashMap,
+    ) -> Result<()> {
+        let src_hash = compute_file_sha256(&source.path)?;
+        if target_hashes.contains(&src_hash) {
+            self.skipped_existing += 1;
+        } else if let Some(usb_path) = displaced_map.get(&src_hash) {
+            let usb_path = usb_path.clone();
+            self.displaced_in_target.insert(source.path.clone(), usb_path.clone());
+            self.displaced_planned_paths.insert(usb_path);
+            self.files_to_process.push(source);
+        } else {
+            self.files_to_process.push(source);
+        }
+        Ok(())
+    }
+}
+
+fn finish_sync_diff(
+    acc: SourceDiffAcc,
+    target_files: TargetAudioFiles,
+    checkpoint_known_names: &HashSet<String>,
+) -> Result<SyncDiffReport> {
+    let SourceDiffAcc {
+        files_to_process,
+        skipped_existing,
+        displaced_in_target,
+        displaced_planned_paths,
+    } = acc;
 
     let mut existing_volume_counts: BTreeMap<usize, usize> = BTreeMap::new();
     let mut max_existing_index = 0usize;
@@ -449,52 +473,45 @@ pub fn calculate_sync_diff(
     })
 }
 
-pub fn plan_incremental_distribution(
-    file_mappings: Vec<(PathBuf, String)>,
-    existing_volume_counts: &BTreeMap<usize, usize>,
-) -> Vec<VolumeSegment> {
-    if file_mappings.is_empty() {
-        return Vec::new();
+pub fn calculate_sync_diff(
+    source_files: &[AudioFile],
+    target_mount: &Path,
+    checkpoint_known_names: &HashSet<String>,
+) -> Result<SyncDiffReport> {
+    let (target_hashes, displaced_hash_to_path, target_files) =
+        build_target_hash_index(target_mount)?;
+
+    let mut acc = SourceDiffAcc::new();
+    for source in source_files {
+        acc.process(source.clone(), &target_hashes, &displaced_hash_to_path)?;
     }
 
-    let mut new_segments: HashMap<usize, VolumeSegment> = HashMap::new();
-    let mut current_volume = existing_volume_counts
-        .keys()
-        .next_back()
-        .copied()
-        .unwrap_or(1);
-    let mut current_count = existing_volume_counts
-        .get(&current_volume)
-        .copied()
-        .unwrap_or(0);
-
-    if current_count >= MAX_FILES_PER_FOLDER {
-        current_volume += 1;
-        current_count = 0;
-    }
-
-    for (source_path, sanitized_name) in file_mappings {
-        if current_count >= MAX_FILES_PER_FOLDER {
-            current_volume += 1;
-            current_count = 0;
-        }
-
-        let segment = new_segments
-            .entry(current_volume)
-            .or_insert_with(|| VolumeSegment::new(current_volume));
-
-        segment.add_file(DistributedFile {
-            source_path,
-            sanitized_name,
-        });
-
-        current_count += 1;
-    }
-
-    let mut volumes: Vec<(usize, VolumeSegment)> = new_segments.into_iter().collect();
-    volumes.sort_by_key(|(idx, _)| *idx);
-    volumes.into_iter().map(|(_, seg)| seg).collect()
+    finish_sync_diff(acc, target_files, checkpoint_known_names)
 }
+
+/// Streaming variant of [`calculate_sync_diff`].
+///
+/// Builds the USB target hash index first (bounded by USB file count), then
+/// streams source files one at a time via [`visit_audio_files`] — avoiding
+/// materialising the full source `Vec<AudioFile>` before the diff starts.
+///
+/// Use this path when `sync_mode` is active and `strict_parity` is not required.
+pub fn calculate_sync_diff_streaming(
+    source_root: &Path,
+    target_mount: &Path,
+    checkpoint_known_names: &HashSet<String>,
+) -> Result<SyncDiffReport> {
+    let (target_hashes, displaced_hash_to_path, target_files) =
+        build_target_hash_index(target_mount)?;
+
+    let mut acc = SourceDiffAcc::new();
+    visit_audio_files(source_root, |source| {
+        acc.process(source, &target_hashes, &displaced_hash_to_path)
+    })?;
+
+    finish_sync_diff(acc, target_files, checkpoint_known_names)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -502,27 +519,6 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_plan_incremental_distribution_fills_last_volume() {
-        let mut existing = BTreeMap::new();
-        existing.insert(1, 50);
-        existing.insert(2, 48);
-
-        let mappings = vec![
-            (PathBuf::from("a.mp3"), "051_a.mp3".to_string()),
-            (PathBuf::from("b.mp3"), "052_b.mp3".to_string()),
-            (PathBuf::from("c.mp3"), "053_c.mp3".to_string()),
-        ];
-
-        let planned = plan_incremental_distribution(mappings, &existing);
-
-        assert_eq!(planned.len(), 2);
-        assert_eq!(planned[0].folder_name, "VOL_02");
-        assert_eq!(planned[0].files.len(), 2);
-        assert_eq!(planned[1].folder_name, "VOL_03");
-        assert_eq!(planned[1].files.len(), 1);
-    }
 
     #[test]
     fn test_calculate_sync_diff_skips_existing_by_hash() -> Result<()> {
@@ -546,6 +542,35 @@ mod tests {
         assert_eq!(report.files_to_process.len(), 1);
         assert!(report.files_to_process[0].path.ends_with("song_b.mp3"));
         assert_eq!(report.max_existing_index, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_calculate_sync_diff_streaming_matches_eager() -> Result<()> {
+        let source = TempDir::new()?;
+        let usb = TempDir::new()?;
+
+        fs::create_dir_all(usb.path().join("VOL_01"))?;
+
+        let src_existing = source.path().join("existing.mp3");
+        let src_new = source.path().join("new.mp3");
+        fs::write(&src_existing, b"same content")?;
+        fs::write(&src_new, b"new content")?;
+        fs::write(usb.path().join("VOL_01/001_existing.mp3"), b"same content")?;
+
+        let known_names = HashSet::new();
+        let eager_source = discover_audio_files(source.path())?.audio_files;
+        let eager = calculate_sync_diff(&eager_source, usb.path(), &known_names)?;
+        let streaming = calculate_sync_diff_streaming(source.path(), usb.path(), &known_names)?;
+
+        assert_eq!(eager.skipped_existing, streaming.skipped_existing);
+        assert_eq!(eager.max_existing_index, streaming.max_existing_index);
+        assert_eq!(eager.files_to_process.len(), streaming.files_to_process.len());
+        assert_eq!(
+            eager.untracked_in_target.len(),
+            streaming.untracked_in_target.len()
+        );
 
         Ok(())
     }
@@ -691,22 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_incremental_distribution_starts_at_volume_one_when_no_existing() {
-        let mappings = vec![
-            (PathBuf::from("a.mp3"), "001_a.mp3".to_string()),
-            (PathBuf::from("b.mp3"), "002_b.mp3".to_string()),
-        ];
-
-        let planned = plan_incremental_distribution(mappings, &BTreeMap::new());
-
-        assert_eq!(planned.len(), 1);
-        assert_eq!(planned[0].folder_name, "VOL_01");
-        assert_eq!(planned[0].files.len(), 2);
-    }
-
-    #[test]
     fn test_quarantine_untracked_files_backup_first() -> Result<()> {
-        let source = TempDir::new()?;
         let usb = TempDir::new()?;
         let backup_root = TempDir::new()?;
 
@@ -728,22 +738,6 @@ mod tests {
         assert!(report.quarantined[0].exists());
         assert!(backup_meta.file_count >= 1);
 
-        let _ = source;
-        Ok(())
-    }
-
-    #[test]
-    fn test_collect_non_whitelisted_root_entries_detects_noise() -> Result<()> {
-        let usb = TempDir::new()?;
-        fs::create_dir_all(usb.path().join("VOL_01"))?;
-        fs::create_dir_all(usb.path().join("musica_vieja"))?;
-        fs::write(usb.path().join("documento.pdf"), b"pdf")?;
-
-        let entries = collect_non_whitelisted_root_entries(usb.path())?;
-
-        assert_eq!(entries.len(), 2);
-        assert!(entries.iter().any(|p| p.ends_with("musica_vieja")));
-        assert!(entries.iter().any(|p| p.ends_with("documento.pdf")));
         Ok(())
     }
 

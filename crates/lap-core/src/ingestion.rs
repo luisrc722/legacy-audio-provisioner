@@ -19,7 +19,10 @@ use std::path::{Path, PathBuf};
 
 use crate::audio_discovery;
 use crate::ipc::IpcEvent;
+use crate::sanitizer;
 use crate::security::{validate_filename_comprehensive, validate_path_containment};
+
+const LEGACY_MAX_FILENAME_BYTES: usize = 32;
 
 /// Entrada del manifiesto de ingesta: trazabilidad origen -> staging + SHA256.
 #[derive(Debug, Clone)]
@@ -49,9 +52,21 @@ pub struct IngestManifest {
 /// - Resuelve colisiones de nombre con sufijo `_001`, `_002`, etc.
 /// - Retorna un manifiesto con trazabilidad fuente -> staging + SHA256.
 pub fn ingest_audio_files(from: &Path, to: &Path, json_mode: bool) -> Result<IngestManifest> {
-    let report = audio_discovery::discover_audio_files(from)?;
+    ingest_audio_files_with_progress(from, to, json_mode, |_, _, _| {})
+}
 
-    if report.audio_files.is_empty() {
+pub fn ingest_audio_files_with_progress<F>(
+    from: &Path,
+    to: &Path,
+    json_mode: bool,
+    mut on_progress: F,
+) -> Result<IngestManifest>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let total = audio_discovery::count_audio_files(from)?;
+
+    if total == 0 {
         return Err(anyhow::anyhow!(
             "No se encontraron archivos de audio en '{}'",
             from.display()
@@ -65,7 +80,6 @@ pub fn ingest_audio_files(from: &Path, to: &Path, json_mode: bool) -> Result<Ing
         )
     })?;
 
-    let total = report.audio_files.len();
     info!(
         "Iniciando ingesta: {} archivos desde '{}' hacia '{}'",
         total,
@@ -76,20 +90,23 @@ pub fn ingest_audio_files(from: &Path, to: &Path, json_mode: bool) -> Result<Ing
     let mut ingested: Vec<IngestedFile> = Vec::with_capacity(total);
     let mut total_bytes = 0u64;
     let mut used_names: HashSet<String> = HashSet::new();
+    let mut files_processed = 0usize;
 
-    for (idx, audio_file) in report.audio_files.iter().enumerate() {
-        let base_name = audio_file
-            .path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+    audio_discovery::visit_audio_files(from, |audio_file| {
+        let original_name = audio_file.filename.clone();
 
-        // R-35: Validar que el nombre no contiene caracteres de command injection
+        // 1) Sanitizacion + truncamiento legacy (32 chars max, preservando extension)
+        // 2) Mutacion de estado: a partir de aqui solo se usa el nombre saneado
+        let mut base_name = sanitize_for_legacy_transfer(&original_name);
+        if base_name.is_empty() {
+            base_name = "audio.mp3".to_string();
+        }
+
+        // 3) Validacion sobre el valor mutado/saneado (nunca sobre el original)
         validate_filename_comprehensive(&base_name).with_context(|| {
             format!(
-                "Nombre de archivo contiene caracteres peligrosos (R-35): {}",
-                base_name
+                "Nombre de archivo contiene caracteres peligrosos (R-35): original='{}' saneado='{}'",
+                original_name, base_name
             )
         })?;
 
@@ -115,12 +132,15 @@ pub fn ingest_audio_files(from: &Path, to: &Path, json_mode: bool) -> Result<Ing
 
         let sha256_hex = sha256_of_file(&staged_path)?;
         total_bytes += audio_file.size_bytes;
+        files_processed += 1;
+
+        on_progress(files_processed, total, &staged_name);
 
         IpcEvent::Progress {
-            files_processed: idx + 1,
+            files_processed,
             total_files: total,
-            percentage: ((idx + 1) as f64 / total as f64) * 100.0,
-            current_file: staged_name,
+            percentage: (files_processed as f64 / total as f64) * 100.0,
+            current_file: staged_name.clone(),
             eta_seconds: 0,
         }
         .emit(json_mode);
@@ -130,7 +150,9 @@ pub fn ingest_audio_files(from: &Path, to: &Path, json_mode: bool) -> Result<Ing
             staged_path,
             sha256_hex,
         });
-    }
+
+        Ok(())
+    })?;
 
     info!(
         "Ingesta completada: {} archivos, {:.2} MB",
@@ -186,4 +208,94 @@ fn sha256_of_file(path: &Path) -> Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+fn sanitize_for_legacy_transfer(raw_name: &str) -> String {
+    let raw_path = Path::new(raw_name);
+    let raw_stem = raw_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(raw_name);
+    let raw_ext = raw_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    let mut safe_stem = sanitizer::sanitize_filename(raw_stem);
+    if safe_stem.is_empty() {
+        safe_stem = "audio".to_string();
+    }
+
+    let mut safe_ext = sanitizer::sanitize_filename(raw_ext);
+    safe_ext.retain(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+
+    let ext_part = if safe_ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{}", safe_ext)
+    };
+
+    // Mantiene la extension cuando sea posible y respeta el limite legacy.
+    if ext_part.len() >= LEGACY_MAX_FILENAME_BYTES {
+        return safe_stem.chars().take(LEGACY_MAX_FILENAME_BYTES).collect();
+    }
+
+    let available_stem_len = LEGACY_MAX_FILENAME_BYTES - ext_part.len();
+    safe_stem = safe_stem.chars().take(available_stem_len).collect();
+
+    if safe_stem.is_empty() {
+        safe_stem = "a".to_string();
+    }
+
+    format!("{}{}", safe_stem, ext_part)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_sanitize_for_legacy_transfer_truncates_to_32_and_keeps_extension() {
+        let input = "Cancion super_larga con simbolos !!! y espacios.mp3";
+        let result = sanitize_for_legacy_transfer(input);
+
+        assert!(result.len() <= 32);
+        assert!(result.ends_with(".mp3"));
+        assert!(result.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn test_sanitize_for_legacy_transfer_uses_fallback_stem_when_empty() {
+        let input = "¡¡¡###@@@.mp3";
+        let result = sanitize_for_legacy_transfer(input);
+
+        assert_eq!(result, "audio.mp3");
+    }
+
+    #[test]
+    fn test_ingest_audio_files_with_progress_processes_one_by_one() -> Result<()> {
+        let source = TempDir::new()?;
+        let staging = TempDir::new()?;
+
+        fs::write(source.path().join("01 - canción.mp3"), b"abc")?;
+        fs::write(source.path().join("02 - otra.mp3"), b"def")?;
+
+        let mut progress_events = Vec::new();
+        let manifest = ingest_audio_files_with_progress(
+            source.path(),
+            staging.path(),
+            false,
+            |processed, total, current_file| {
+                progress_events.push((processed, total, current_file.to_string()));
+            },
+        )?;
+
+        assert_eq!(manifest.files.len(), 2);
+        assert_eq!(progress_events.len(), 2);
+        assert_eq!(progress_events[0].0, 1);
+        assert_eq!(progress_events[0].1, 2);
+        assert!(progress_events[0].2.ends_with(".mp3"));
+        assert_eq!(progress_events[1].0, 2);
+
+        Ok(())
+    }
 }

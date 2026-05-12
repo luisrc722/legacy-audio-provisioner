@@ -79,6 +79,14 @@ pub struct AudioDiscoveryReport {
     pub scan_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AudioDiscoveryStats {
+    pub total_files: usize,
+    pub total_size_bytes: u64,
+    pub max_depth: usize,
+    pub directories_scanned: usize,
+}
+
 impl AudioDiscoveryReport {
     /// Obtener tamaño total en MB
     pub fn total_size_mb(&self) -> f64 {
@@ -139,6 +147,17 @@ pub fn discover_audio_files(root_path: &Path) -> Result<AudioDiscoveryReport> {
     discover_audio_core(root_path, usize::MAX)
 }
 
+pub fn count_audio_files(root_path: &Path) -> Result<usize> {
+    Ok(visit_audio_files(root_path, |_| Ok(()))?.total_files)
+}
+
+pub fn visit_audio_files<F>(root_path: &Path, on_file: F) -> Result<AudioDiscoveryStats>
+where
+    F: FnMut(AudioFile) -> Result<()>,
+{
+    visit_audio_files_limited_depth(root_path, usize::MAX, on_file)
+}
+
 /// Buscar archivos de audio con límite de profundidad
 /// Ignora automáticamente archivos y carpetas ocultas
 pub fn discover_audio_files_limited_depth(
@@ -149,10 +168,52 @@ pub fn discover_audio_files_limited_depth(
     discover_audio_core(root_path, max_depth.saturating_add(1))
 }
 
+pub fn visit_audio_files_limited_depth<F>(
+    root_path: &Path,
+    max_depth: usize,
+    on_file: F,
+) -> Result<AudioDiscoveryStats>
+where
+    F: FnMut(AudioFile) -> Result<()>,
+{
+    visit_audio_core(root_path, max_depth.saturating_add(1), on_file)
+}
+
 /// Motor principal de búsqueda (implementación D.R.Y. - Don't Repeat Yourself)
 /// Refactorización que elimina código duplicado entre las dos funciones públicas
 fn discover_audio_core(root_path: &Path, max_depth: usize) -> Result<AudioDiscoveryReport> {
-    // Validación de ruta
+    let mut audio_files = Vec::new();
+    let stats = visit_audio_core(root_path, max_depth, |audio_file| {
+        audio_files.push(audio_file);
+        Ok(())
+    })?;
+
+    // Ordenar archivos por ruta para reproducibilidad
+    audio_files.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let total_files = audio_files.len();
+    info!(
+        "Audio discovery complete: {} files, {:.2} GB (directories: {})",
+        total_files,
+        stats.total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+        stats.directories_scanned
+    );
+
+    Ok(AudioDiscoveryReport {
+        root_path: root_path.to_path_buf(),
+        total_files,
+        audio_files,
+        total_size_bytes: stats.total_size_bytes,
+        max_depth: stats.max_depth,
+        directories_scanned: stats.directories_scanned,
+        scan_error: None,
+    })
+}
+
+fn visit_audio_core<F>(root_path: &Path, max_depth: usize, mut on_file: F) -> Result<AudioDiscoveryStats>
+where
+    F: FnMut(AudioFile) -> Result<()>,
+{
     if !root_path.exists() {
         return Err(anyhow!("Path does not exist: {}", root_path.display()));
     }
@@ -167,15 +228,11 @@ fn discover_audio_core(root_path: &Path, max_depth: usize) -> Result<AudioDiscov
         max_depth
     );
 
-    let mut audio_files = Vec::new();
-    let mut total_size_bytes = 0u64;
-    let mut found_max_depth = 0usize;
-    let mut directories_scanned = 0usize;
+    let mut stats = AudioDiscoveryStats::default();
 
-    // CRÍTICO: filter_entry previene que WalkDir descienda en carpetas ocultas
-    // Esto es mucho más eficiente y evita que detectemos archivos como .Trash/file.mp3
     let walker = WalkDir::new(root_path)
         .max_depth(max_depth)
+        .sort_by_file_name()
         .into_iter()
         .filter_entry(|e| !is_hidden(e))
         .filter_map(|e| e.ok());
@@ -184,29 +241,23 @@ fn discover_audio_core(root_path: &Path, max_depth: usize) -> Result<AudioDiscov
         let path = entry.path();
         let depth = entry.depth();
 
-        // Actualizar máxima profundidad
-        if depth > found_max_depth {
-            found_max_depth = depth;
+        if depth > stats.max_depth {
+            stats.max_depth = depth;
         }
 
-        // Contar directorios
         if path.is_dir() {
-            directories_scanned += 1;
+            stats.directories_scanned += 1;
             continue;
         }
 
-        // Procesar archivos de audio
         if let Some(ext) = path
             .extension()
             .and_then(|e| e.to_str())
             .map(|s| s.to_lowercase())
         {
             if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
-                // Usar metadata ya disponible en walkdir evita una syscall extra por archivo.
                 if let Ok(metadata) = entry.metadata() {
                     let size = metadata.len();
-                    total_size_bytes += size;
-
                     let filename = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -215,42 +266,33 @@ fn discover_audio_core(root_path: &Path, max_depth: usize) -> Result<AudioDiscov
                     let audio_file = AudioFile {
                         path: path.to_path_buf(),
                         filename,
-                        extension: ext.clone(),
+                        extension: ext,
                         size_bytes: size,
                         depth: depth.saturating_sub(1),
                     };
 
-                    audio_files.push(audio_file);
+                    stats.total_files += 1;
+                    stats.total_size_bytes += size;
+
                     info!(
                         "Found audio file: {} ({:.2} MB)",
                         path.display(),
                         size as f64 / (1024.0 * 1024.0)
                     );
+                    on_file(audio_file)?;
                 }
             }
         }
     }
 
-    // Ordenar archivos por ruta para reproducibilidad
-    audio_files.sort_by(|a, b| a.path.cmp(&b.path));
-
-    let total_files = audio_files.len();
     info!(
         "Audio discovery complete: {} files, {:.2} GB (directories: {})",
-        total_files,
-        total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-        directories_scanned
+        stats.total_files,
+        stats.total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+        stats.directories_scanned
     );
 
-    Ok(AudioDiscoveryReport {
-        root_path: root_path.to_path_buf(),
-        total_files,
-        audio_files,
-        total_size_bytes,
-        max_depth: found_max_depth,
-        directories_scanned,
-        scan_error: None,
-    })
+    Ok(stats)
 }
 
 #[cfg(test)]
@@ -407,6 +449,25 @@ mod tests {
 
         assert_eq!(report.total_files, 3);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_visit_audio_files_streams_entries() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        File::create(temp_dir.path().join("a.mp3"))?;
+        File::create(temp_dir.path().join("b.flac"))?;
+        File::create(temp_dir.path().join("c.txt"))?;
+
+        let mut visited = Vec::new();
+        let stats = visit_audio_files(temp_dir.path(), |audio_file| {
+            visited.push(audio_file.filename);
+            Ok(())
+        })?;
+
+        assert_eq!(stats.total_files, 2);
+        assert_eq!(visited, vec!["a.mp3".to_string(), "b.flac".to_string()]);
         Ok(())
     }
 }

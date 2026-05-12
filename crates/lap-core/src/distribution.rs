@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use log::info;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub const MAX_FILES_PER_FOLDER: usize = 50;
@@ -17,6 +18,74 @@ pub const MAX_FILES_PER_FOLDER: usize = 50;
 pub struct DistributedFile {
     pub source_path: PathBuf,
     pub sanitized_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlannedFile {
+    pub folder_name: String,
+    pub volume_index: usize,
+    pub source_path: PathBuf,
+    pub sanitized_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct VolumePlanner {
+    current_volume: usize,
+    current_count: usize,
+}
+
+impl Default for VolumePlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VolumePlanner {
+    pub fn new() -> Self {
+        Self {
+            current_volume: 1,
+            current_count: 0,
+        }
+    }
+
+    pub fn for_incremental(existing_volume_counts: &BTreeMap<usize, usize>) -> Self {
+        let mut current_volume = existing_volume_counts
+            .keys()
+            .next_back()
+            .copied()
+            .unwrap_or(1);
+        let mut current_count = existing_volume_counts
+            .get(&current_volume)
+            .copied()
+            .unwrap_or(0);
+
+        if current_count >= MAX_FILES_PER_FOLDER {
+            current_volume += 1;
+            current_count = 0;
+        }
+
+        Self {
+            current_volume,
+            current_count,
+        }
+    }
+
+    pub fn plan_file(&mut self, source_path: PathBuf, sanitized_name: String) -> PlannedFile {
+        if self.current_count >= MAX_FILES_PER_FOLDER {
+            self.current_volume += 1;
+            self.current_count = 0;
+        }
+
+        let planned = PlannedFile {
+            folder_name: format!("VOL_{:02}", self.current_volume),
+            volume_index: self.current_volume,
+            source_path,
+            sanitized_name,
+        };
+
+        self.current_count += 1;
+        planned
+    }
 }
 
 #[derive(Debug, Clone)]

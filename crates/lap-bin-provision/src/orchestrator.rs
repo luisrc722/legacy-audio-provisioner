@@ -34,6 +34,69 @@ impl ProvisioningOrchestrator {
         }
     }
 
+    fn should_safe_eject() -> bool {
+        std::env::var("LAP_SAFE_EJECT")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    fn finalize_mount_state(
+        &mut self,
+        step_es: &str,
+        step_en: &str,
+        device_path: &Path,
+        usb_mount: &Path,
+    ) -> Result<bool> {
+        if Self::should_safe_eject() {
+            self.reporter
+                .info(&format!("\n{}", tr(step_es, step_en)));
+            verification::safe_eject(device_path, usb_mount)?;
+            Ok(true)
+        } else {
+            self.reporter.info(tr(
+                "USB mantenida montada al finalizar. Para expulsar automaticamente, use LAP_SAFE_EJECT=1.",
+                "USB kept mounted at the end. To auto-eject, set LAP_SAFE_EJECT=1.",
+            ));
+            Ok(false)
+        }
+    }
+
+    fn build_compact_name(
+        file: &audio_discovery::AudioFile,
+        global_index: usize,
+        backup: Option<&backup::BackupMetadata>,
+    ) -> Result<String> {
+        let stem = file
+            .path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("audio");
+
+        let content_hash = backup
+            .and_then(|metadata| metadata.checksums.get(&file.path))
+            .cloned()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                compute_file_sha256(&file.path).with_context(|| {
+                    format!(
+                        "No se pudo calcular SHA256 para naming compacto de '{}'",
+                        file.path.display()
+                    )
+                })
+            })?;
+
+        Ok(sanitizer::build_hashed_legacy_name(
+            stem,
+            global_index,
+            &content_hash,
+        ))
+    }
+
     pub fn list_usb_devices(&mut self) -> Result<()> {
         self.reporter
             .info(&format!("\n{}\n", tr("=== Detectando Dispositivos USB ===", "=== Detecting USB Devices ===")));
@@ -715,9 +778,12 @@ impl ProvisioningOrchestrator {
 
         checkpoint.finalize()?;
 
-        self.reporter
-            .info(tr("Paso 5: Expulsion segura...", "Step 5: Safe ejection..."));
-        verification::safe_eject(&device.device_path, usb_mount)?;
+        let _ = self.finalize_mount_state(
+            "Paso 5: Expulsion segura...",
+            "Step 5: Safe ejection...",
+            &device.device_path,
+            usb_mount,
+        )?;
 
         self.reporter.finish(tr(
             "Reconstruccion in-place de metadatos completada correctamente.",
@@ -785,21 +851,28 @@ impl ProvisioningOrchestrator {
                     "Step 2: Scanning audio files (Secure Mode)..."
                 )
             ));
-        let discovery_report = audio_discovery::discover_audio_files(audio_source)?;
-        let discovered_source_files = discovery_report.audio_files;
-        self.reporter.info(&format!(
-            "{} {} {}",
-            tr("Se encontraron", "Found"),
-            discovered_source_files.len()
-            ,
-            tr("archivos de audio", "audio files")
-        ));
-
-        if discovered_source_files.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No valid audio files found in source. Aborting."
-            ));
-        }
+        // Eager discovery only when needed: non-sync (full list is reused as audio_files)
+        // or strict_parity (preflight needs the full slice).
+        // For sync && !strict_parity we stream directly through calculate_sync_diff_streaming.
+        let discovered_source_files: Option<Vec<audio_discovery::AudioFile>> =
+            if !sync_mode || strict_parity {
+                let report = audio_discovery::discover_audio_files(audio_source)?;
+                let files = report.audio_files;
+                self.reporter.info(&format!(
+                    "{} {} {}",
+                    tr("Se encontraron", "Found"),
+                    files.len(),
+                    tr("archivos de audio", "audio files")
+                ));
+                if files.is_empty() {
+                    return Err(anyhow::anyhow!(
+                        "No valid audio files found in source. Aborting."
+                    ));
+                }
+                Some(files)
+            } else {
+                None
+            };
 
         let mut next_global_index = 1usize;
         let mut existing_volume_counts = std::collections::BTreeMap::new();
@@ -826,7 +899,7 @@ impl ProvisioningOrchestrator {
             ));
 
             Self::enforce_strict_parity_preflight(
-                &discovered_source_files,
+                discovered_source_files.as_deref().expect("eager discovery required for strict_parity"),
                 usb_mount,
                 &state_paths.manifest_file,
             )?;
@@ -863,11 +936,34 @@ impl ProvisioningOrchestrator {
         }
 
         let (audio_files, skipped_existing, mut untracked_in_target) = if sync_mode {
-            let diff_report = diffing::calculate_sync_diff(
-                &discovered_source_files,
-                usb_mount,
-                &checkpoint_known_names,
-            )?;
+            let diff_report = if strict_parity {
+                diffing::calculate_sync_diff(
+                    discovered_source_files.as_deref().expect("eager discovery required for strict_parity"),
+                    usb_mount,
+                    &checkpoint_known_names,
+                )?
+            } else {
+                // Streaming path: source files are scanned inside calculate_sync_diff_streaming,
+                // no full Vec<AudioFile> for source is held in memory during the diff.
+                let diff_report = diffing::calculate_sync_diff_streaming(
+                    audio_source,
+                    usb_mount,
+                    &checkpoint_known_names,
+                )?;
+                let total_source = diff_report.skipped_existing + diff_report.files_to_process.len();
+                self.reporter.info(&format!(
+                    "{} {} {}",
+                    tr("Se encontraron", "Found"),
+                    total_source,
+                    tr("archivos de audio", "audio files")
+                ));
+                if total_source == 0 {
+                    return Err(anyhow::anyhow!(
+                        "No valid audio files found in source. Aborting."
+                    ));
+                }
+                diff_report
+            };
 
             next_global_index = next_global_index.max(diff_report.max_existing_index.saturating_add(1));
             existing_volume_counts = diff_report.existing_volume_counts;
@@ -879,7 +975,7 @@ impl ProvisioningOrchestrator {
                 diff_report.untracked_in_target,
             )
         } else {
-            (discovered_source_files, 0usize, Vec::new())
+            (discovered_source_files.expect("eager discovery required for non-sync"), 0usize, Vec::new())
         };
 
         if sync_mode {
@@ -1143,97 +1239,79 @@ impl ProvisioningOrchestrator {
         )?;
         checkpoint.set_auto_persist(false);
 
-        let mut file_mappings: Vec<(PathBuf, String)> = Vec::with_capacity(audio_files.len());
-        for (idx, file) in audio_files.iter().enumerate() {
-            let stem = file
-                .path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("audio");
-
-            let content_hash = backup
-                .as_ref()
-                .and_then(|b| b.checksums.get(&file.path))
-                .cloned()
-                .map(Ok)
-                .unwrap_or_else(|| {
-                    compute_file_sha256(&file.path).with_context(|| {
-                        format!(
-                            "No se pudo calcular SHA256 para naming compacto de '{}'",
-                            file.path.display()
-                        )
-                    })
-                })?;
-
-            let compact_name = sanitizer::build_hashed_legacy_name(
-                stem,
-                idx + next_global_index,
-                &content_hash,
-            );
-            file_mappings.push((file.path.clone(), compact_name));
-        }
-
-        let volumes = if sync_mode {
-            diffing::plan_incremental_distribution(file_mappings, &existing_volume_counts)
+        let mut preview_planner = if sync_mode {
+            distribution::VolumePlanner::for_incremental(&existing_volume_counts)
         } else {
-            distribution::plan_distribution(file_mappings)?
+            distribution::VolumePlanner::new()
         };
-        self.reporter
-            .info(&format!("Planned {} volume(s)", volumes.len()));
+        let mut planned_volume_names = HashSet::new();
+        let mut move_candidates = 0usize;
 
-        if sync_mode {
-            let mut move_candidates = 0usize;
-            for volume in &volumes {
-                for file in &volume.files {
-                    let is_mp3_source = file
-                        .source_path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("mp3"))
-                        .unwrap_or(false);
+        for (idx, file) in audio_files.iter().enumerate() {
+            let compact_name = Self::build_compact_name(
+                file,
+                idx + next_global_index,
+                backup.as_ref(),
+            )?;
+            let planned = preview_planner.plan_file(file.path.clone(), compact_name);
+            planned_volume_names.insert(planned.folder_name.clone());
 
-                    if !is_mp3_source {
-                        continue;
-                    }
-
-                    if let Some(displaced_usb_path) = displaced_in_target.get(&file.source_path) {
-                        let decision = normalizer::classify_audio_processing(&file.source_path)?;
-                        if decision != normalizer::ProcessingDecision::FastInPlaceRename {
-                            continue;
-                        }
-
-                        let volume_dir = validate_path_containment(
-                            usb_mount,
-                            Path::new(&volume.folder_name),
-                        )
-                        .with_context(|| {
-                            format!(
-                                "R-05: Violacion de contencion en volumen: {}",
-                                volume.folder_name
-                            )
-                        })?;
-                        let target_abs = validate_path_containment(
-                            &volume_dir,
-                            Path::new(&file.sanitized_name),
-                        )
-                        .with_context(|| {
-                            format!(
-                                "R-05: Violacion de contencion en destino: {}",
-                                file.sanitized_name
-                            )
-                        })?;
-                        let source_rel = Self::to_usb_relative(displaced_usb_path, usb_mount);
-                        let target_rel = Self::to_usb_relative(&target_abs, usb_mount);
-                        let expected_hash = compute_file_sha256(&file.source_path)?;
-
-                        if let Some(journal_mgr) = move_journal.as_mut() {
-                            journal_mgr.ensure_move_transaction(source_rel, target_rel, expected_hash)?;
-                        }
-                        move_candidates += 1;
-                    }
-                }
+            if !sync_mode {
+                continue;
             }
 
+            let is_mp3_source = file
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("mp3"))
+                .unwrap_or(false);
+
+            if !is_mp3_source {
+                continue;
+            }
+
+            if let Some(displaced_usb_path) = displaced_in_target.get(&file.path) {
+                let decision = normalizer::classify_audio_processing(&file.path)?;
+                if decision != normalizer::ProcessingDecision::FastInPlaceRename {
+                    continue;
+                }
+
+                let volume_dir = validate_path_containment(
+                    usb_mount,
+                    Path::new(&planned.folder_name),
+                )
+                .with_context(|| {
+                    format!(
+                        "R-05: Violacion de contencion en volumen: {}",
+                        planned.folder_name
+                    )
+                })?;
+                let target_abs = validate_path_containment(
+                    &volume_dir,
+                    Path::new(&planned.sanitized_name),
+                )
+                .with_context(|| {
+                    format!(
+                        "R-05: Violacion de contencion en destino: {}",
+                        planned.sanitized_name
+                    )
+                })?;
+                let source_rel = Self::to_usb_relative(displaced_usb_path, usb_mount);
+                let target_rel = Self::to_usb_relative(&target_abs, usb_mount);
+                let expected_hash = compute_file_sha256(&file.path)?;
+
+                if let Some(journal_mgr) = move_journal.as_mut() {
+                    journal_mgr.ensure_move_transaction(source_rel, target_rel, expected_hash)?;
+                }
+                move_candidates += 1;
+            }
+        }
+
+        self.reporter
+            .info(&format!("Planned {} volume(s)", planned_volume_names.len()));
+
+        if sync_mode {
             let provision_candidates = audio_files.len().saturating_sub(move_candidates);
             self.reporter.info(&format!(
                 "\n{}",
@@ -1278,61 +1356,101 @@ impl ProvisioningOrchestrator {
                 manifest::ProcessedFileManifest::load_or_create_at(&state_paths.manifest_file)?;
             self.reporter.start_progress(audio_files.len() as u64)?;
 
-            for volume in volumes {
-                checkpoint.add_volume(volume.folder_name.clone())?;
-                let volume_dir = validate_path_containment(usb_mount, Path::new(&volume.folder_name))
+            let mut planner = if sync_mode {
+                distribution::VolumePlanner::for_incremental(&existing_volume_counts)
+            } else {
+                distribution::VolumePlanner::new()
+            };
+            let mut active_volume_name: Option<String> = None;
+            let mut active_volume_dir: Option<PathBuf> = None;
+
+            for (offset, file) in audio_files.iter().enumerate() {
+                let compact_name = Self::build_compact_name(
+                    file,
+                    offset + next_global_index,
+                    backup.as_ref(),
+                )?;
+                let planned = planner.plan_file(file.path.clone(), compact_name);
+
+                if active_volume_name.as_deref() != Some(planned.folder_name.as_str()) {
+                    if let Some(previous_volume_dir) = active_volume_dir.as_ref() {
+                        processed_manifest.save_to_path(&state_paths.manifest_file)?;
+
+                        // [R-02-010] Flush por frontera de volumen (no por archivo)
+                        // para reducir desgaste de I/O y mantener consistencia FAT32.
+                        if let Ok(dir_file) = fs::File::open(previous_volume_dir) {
+                            let _ = dir_file.sync_all();
+                        }
+
+                        checkpoint.save_to_disk()?;
+                    }
+
+                    checkpoint.add_volume(planned.folder_name.clone())?;
+                    let volume_dir = validate_path_containment(
+                        usb_mount,
+                        Path::new(&planned.folder_name),
+                    )
                     .with_context(|| {
                         format!(
                             "R-05: Violacion de contencion en volumen: {}",
-                            volume.folder_name
+                            planned.folder_name
                         )
                     })?;
 
-                fs::create_dir_all(&volume_dir)
-                    .with_context(|| format!("Failed to create volume {}", volume_dir.display()))?;
+                    fs::create_dir_all(&volume_dir)
+                        .with_context(|| format!("Failed to create volume {}", volume_dir.display()))?;
 
-                for file in volume.files {
-                    let dest = validate_path_containment(&volume_dir, Path::new(&file.sanitized_name))
-                        .with_context(|| {
-                            format!(
-                                "R-05: Violacion de contencion en destino: {}",
-                                file.sanitized_name
-                            )
-                        })?;
-                    let original_hash = backup
-                        .as_ref()
-                        .and_then(|b| b.checksums.get(&file.source_path))
-                        .cloned()
-                        .unwrap_or_default();
+                    active_volume_name = Some(planned.folder_name.clone());
+                    active_volume_dir = Some(volume_dir);
+                }
 
-                    checkpoint.record_file_start(
-                        global_idx,
-                        file.source_path.clone(),
-                        file.sanitized_name.clone(),
-                        original_hash,
-                    )?;
-                    // Evita forzar persistencia en USB por cada archivo.
+                let volume_name = planned.folder_name.clone();
+                let volume_dir = active_volume_dir
+                    .as_ref()
+                    .cloned()
+                    .expect("active volume dir must exist");
+                let sanitized_name = planned.sanitized_name.clone();
+                let dest = validate_path_containment(&volume_dir, Path::new(&sanitized_name))
+                    .with_context(|| {
+                        format!(
+                            "R-05: Violacion de contencion en destino: {}",
+                            sanitized_name
+                        )
+                    })?;
+                let original_hash = backup
+                    .as_ref()
+                    .and_then(|b| b.checksums.get(&file.path))
+                    .cloned()
+                    .unwrap_or_default();
 
-                    let progress_msg = format!(
-                        "{}: {} -> {}",
-                        tr("Normalizando", "Normalizing"),
-                        volume.folder_name, file.sanitized_name
-                    );
+                checkpoint.record_file_start(
+                    global_idx,
+                    file.path.clone(),
+                    sanitized_name.clone(),
+                    original_hash,
+                )?;
+                // Evita forzar persistencia en USB por cada archivo.
 
-                    let is_mp3_source = file
-                        .source_path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("mp3"))
-                        .unwrap_or(false);
-                    let processing_decision = normalizer::classify_audio_processing(&file.source_path)?;
+                let progress_msg = format!(
+                    "{}: {} -> {}",
+                    tr("Normalizando", "Normalizing"),
+                    volume_name, sanitized_name
+                );
 
-                    let mut used_in_place_move = false;
-                    if sync_mode && is_mp3_source {
-                        if let Some(displaced_usb_path) = displaced_in_target.get(&file.source_path) {
-                            if processing_decision != normalizer::ProcessingDecision::FastInPlaceRename {
-                                // Archivo sucio/incompatible: cae al pipeline de normalizacion.
-                            } else {
+                let is_mp3_source = file
+                    .path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("mp3"))
+                    .unwrap_or(false);
+                let processing_decision = normalizer::classify_audio_processing(&file.path)?;
+
+                let mut used_in_place_move = false;
+                if sync_mode && is_mp3_source {
+                    if let Some(displaced_usb_path) = displaced_in_target.get(&file.path) {
+                        if processing_decision != normalizer::ProcessingDecision::FastInPlaceRename {
+                            // Archivo sucio/incompatible: cae al pipeline de normalizacion.
+                        } else {
                             let target_rel = Self::to_usb_relative(&dest, usb_mount);
 
                             if let Some(journal_mgr) = move_journal.as_ref() {
@@ -1347,7 +1465,7 @@ impl ProvisioningOrchestrator {
                                         .to_string_lossy()
                                         .to_string();
                                     processed_manifest.register_processed_file(
-                                        file.sanitized_name.clone(),
+                                        sanitized_name.clone(),
                                         usb_checksum,
                                         fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
                                         usb_relative,
@@ -1380,7 +1498,7 @@ impl ProvisioningOrchestrator {
                                     )
                                 })?;
 
-                                let expected_hash = compute_file_sha256(&file.source_path)?;
+                                let expected_hash = compute_file_sha256(&file.path)?;
                                 let moved_hash = compute_file_sha256(&dest)?;
                                 if moved_hash != expected_hash {
                                     if let Some(journal_mgr) = move_journal.as_mut() {
@@ -1408,7 +1526,7 @@ impl ProvisioningOrchestrator {
                                     .to_string_lossy()
                                     .to_string();
                                 processed_manifest.register_processed_file(
-                                    file.sanitized_name.clone(),
+                                    sanitized_name.clone(),
                                     moved_hash,
                                     fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
                                     usb_relative,
@@ -1423,12 +1541,53 @@ impl ProvisioningOrchestrator {
                                     dest.display()
                                 ));
                             }
-                            }
                         }
                     }
+                }
 
-                    if used_in_place_move {
+                if used_in_place_move {
+                    let files_processed = global_idx + 1;
+                    let percentage = if audio_files.is_empty() {
+                        100.0
+                    } else {
+                        (files_processed as f64 / audio_files.len() as f64) * 100.0
+                    };
+                    let elapsed = start.elapsed().as_secs();
+                    let eta_seconds = if files_processed == 0 {
+                        0
+                    } else {
+                        let avg = elapsed / files_processed as u64;
+                        avg.saturating_mul(audio_files.len() as u64 - files_processed as u64)
+                    };
+                    IpcEvent::Progress {
+                        files_processed,
+                        total_files: audio_files.len(),
+                        percentage,
+                        current_file: format!("{}/{}", volume_name, sanitized_name),
+                        eta_seconds,
+                    }
+                    .emit(self.json_mode);
+
+                    global_idx += 1;
+                    continue;
+                }
+
+                match normalizer::normalize_audio(&file.path, &dest, processing_decision) {
+                    Ok(_) => {
+                        let usb_checksum = compute_file_sha256(&dest)?;
+                        checkpoint.mark_file_completed(global_idx, usb_checksum.clone())?;
+                        let usb_relative = Self::to_usb_relative(&dest, usb_mount)
+                            .to_string_lossy()
+                            .to_string();
+                        processed_manifest.register_processed_file(
+                            sanitized_name.clone(),
+                            usb_checksum,
+                            fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
+                            usb_relative,
+                            global_idx,
+                        );
                         let files_processed = global_idx + 1;
+                        self.reporter.inc_progress(1, &progress_msg);
                         let percentage = if audio_files.is_empty() {
                             100.0
                         } else {
@@ -1445,123 +1604,79 @@ impl ProvisioningOrchestrator {
                             files_processed,
                             total_files: audio_files.len(),
                             percentage,
-                            current_file: format!("{}/{}", volume.folder_name, file.sanitized_name),
+                            current_file: format!("{}/{}", volume_name, sanitized_name),
                             eta_seconds,
                         }
                         .emit(self.json_mode);
-
-                        global_idx += 1;
-                        continue;
                     }
-
-                    match normalizer::normalize_audio(&file.source_path, &dest, processing_decision) {
-                        Ok(_) => {
-                            let usb_checksum = compute_file_sha256(&dest)?;
-                            checkpoint.mark_file_completed(global_idx, usb_checksum.clone())?;
-                            let usb_relative = Self::to_usb_relative(&dest, usb_mount)
-                                .to_string_lossy()
-                                .to_string();
-                            processed_manifest.register_processed_file(
-                                file.sanitized_name.clone(),
-                                usb_checksum,
-                                fs::metadata(&dest).map(|m| m.len()).unwrap_or(0),
-                                usb_relative,
-                                global_idx,
-                            );
-                            let files_processed = global_idx + 1;
-                            self.reporter.inc_progress(1, &progress_msg);
-                            let percentage = if audio_files.is_empty() {
-                                100.0
-                            } else {
-                                (files_processed as f64 / audio_files.len() as f64) * 100.0
-                            };
-                            let elapsed = start.elapsed().as_secs();
-                            let eta_seconds = if files_processed == 0 {
-                                0
-                            } else {
-                                let avg = elapsed / files_processed as u64;
-                                avg.saturating_mul(audio_files.len() as u64 - files_processed as u64)
-                            };
-                            IpcEvent::Progress {
-                                files_processed,
-                                total_files: audio_files.len(),
-                                percentage,
-                                current_file: format!("{}/{}", volume.folder_name, file.sanitized_name),
-                                eta_seconds,
+                    Err(e) => {
+                        if matches!(
+                            e.downcast_ref::<ProvisioningError>(),
+                            Some(ProvisioningError::DrmProtected { .. })
+                        ) {
+                            checkpoint.mark_file_failed(global_idx, "Skipped_DRM".to_string())?;
+                            skipped_drm += 1;
+                            if let Some(backup_meta) = backup.as_ref() {
+                                Self::append_drm_skip_log(&backup_meta.backup_dir, &file.path);
                             }
-                            .emit(self.json_mode);
-                        }
-                        Err(e) => {
-                            if matches!(
-                                e.downcast_ref::<ProvisioningError>(),
-                                Some(ProvisioningError::DrmProtected { .. })
-                            ) {
-                                checkpoint.mark_file_failed(global_idx, "Skipped_DRM".to_string())?;
-                                skipped_drm += 1;
-                                if let Some(backup_meta) = backup.as_ref() {
-                                    Self::append_drm_skip_log(&backup_meta.backup_dir, &file.source_path);
-                                }
-                                self.reporter.info(&format!(
-                                    "[SKIP DRM] {}",
-                                    file.source_path.to_string_lossy()
-                                ));
-                                IpcEvent::Warning {
-                                    code: "DRM_SKIPPED".to_string(),
-                                    source_file: file.source_path.to_string_lossy().to_string(),
-                                    message: tr(
-                                        "El archivo esta protegido por cifrado DRM y fue ignorado.",
-                                        "File is DRM-protected and was skipped.",
-                                    )
-                                    .to_string(),
-                                }
-                                .emit(self.json_mode);
-
-                                self.reporter.inc_progress(1, &progress_msg);
-                                global_idx += 1;
-                                continue;
-                            }
-
-                            checkpoint.mark_file_failed(global_idx, e.to_string())?;
-
-                            skipped_failed += 1;
-                            IpcEvent::Warning {
-                                code: "NORMALIZATION_FAILED".to_string(),
-                                source_file: file.source_path.to_string_lossy().to_string(),
-                                message: format!(
-                                    "{}: {}",
-                                    tr(
-                                        "Fallo de normalizacion, archivo omitido",
-                                        "Normalization failed, file skipped"
-                                    ),
-                                    e
-                                ),
-                            }
-                            .emit(self.json_mode);
-
                             self.reporter.info(&format!(
-                                "[SKIP FAIL] {} -> {}",
-                                file.source_path.display(),
-                                e
+                                "[SKIP DRM] {}",
+                                file.path.to_string_lossy()
                             ));
+                            IpcEvent::Warning {
+                                code: "DRM_SKIPPED".to_string(),
+                                source_file: file.path.to_string_lossy().to_string(),
+                                message: tr(
+                                    "El archivo esta protegido por cifrado DRM y fue ignorado.",
+                                    "File is DRM-protected and was skipped.",
+                                )
+                                .to_string(),
+                            }
+                            .emit(self.json_mode);
+
                             self.reporter.inc_progress(1, &progress_msg);
                             global_idx += 1;
                             continue;
                         }
-                    }
-                    global_idx += 1;
-                }
 
-                // Guardar manifest por volumen (host-scoped por dispositivo).
+                        checkpoint.mark_file_failed(global_idx, e.to_string())?;
+
+                        skipped_failed += 1;
+                        IpcEvent::Warning {
+                            code: "NORMALIZATION_FAILED".to_string(),
+                            source_file: file.path.to_string_lossy().to_string(),
+                            message: format!(
+                                "{}: {}",
+                                tr(
+                                    "Fallo de normalizacion, archivo omitido",
+                                    "Normalization failed, file skipped"
+                                ),
+                                e
+                            ),
+                        }
+                        .emit(self.json_mode);
+
+                        self.reporter.info(&format!(
+                            "[SKIP FAIL] {} -> {}",
+                            file.path.display(),
+                            e
+                        ));
+                        self.reporter.inc_progress(1, &progress_msg);
+                        global_idx += 1;
+                        continue;
+                    }
+                }
+                global_idx += 1;
+            }
+
+            if let Some(previous_volume_dir) = active_volume_dir.as_ref() {
                 processed_manifest.save_to_path(&state_paths.manifest_file)?;
 
-                // [R-02-010] Mitigacion de Desgaste NAND / Optimizacion I/O
-                // Politica: no forzar sync por cada archivo; se consolida flush al cierre de volumen
-                // y en eventos transaccionales (checkpoint/espejo/eject seguro).
-                if let Ok(dir_file) = fs::File::open(&volume_dir) {
+                // [R-02-010] Flush final del ultimo volumen procesado.
+                if let Ok(dir_file) = fs::File::open(previous_volume_dir) {
                     let _ = dir_file.sync_all();
                 }
 
-                // Consolidar persistencia del checkpoint al cierre de cada volumen.
                 checkpoint.save_to_disk()?;
             }
             self.reporter
@@ -1606,11 +1721,16 @@ impl ProvisioningOrchestrator {
             self.reporter
                 .info(tr("Checkpoint finalizado tras QA.", "Checkpoint finalized after QA."));
 
-            if !dry_run {
-                self.reporter
-                    .info(&format!("\n{}", tr("Paso 7: Expulsion segura...", "Step 7: Safe ejection...")));
-                verification::safe_eject(&device.device_path, usb_mount)?;
-            }
+            let ejected = if !dry_run {
+                self.finalize_mount_state(
+                    "Paso 7: Expulsion segura...",
+                    "Step 7: Safe ejection...",
+                    &device.device_path,
+                    usb_mount,
+                )?
+            } else {
+                false
+            };
 
             if sync_mode {
                 if let Some(journal_mgr) = move_journal.as_ref() {
@@ -1635,7 +1755,12 @@ impl ProvisioningOrchestrator {
                 total_skipped: skipped_drm + skipped_failed,
                 elapsed_time_seconds: start.elapsed().as_secs(),
                 message: format!(
-                    "Provision completada y dispositivo desmontado de forma segura. {} archivo(s) aislado(s) en .legacy_quarantine (topologia:{} + huérfanos:{}).",
+                    "Provision completada y dispositivo {}. {} archivo(s) aislado(s) en .legacy_quarantine (topologia:{} + huérfanos:{}).",
+                    if ejected {
+                        "desmontado de forma segura"
+                    } else {
+                        "mantenido montado"
+                    },
                     topology_quarantined_count + quarantined_count,
                     topology_quarantined_count,
                     quarantined_count

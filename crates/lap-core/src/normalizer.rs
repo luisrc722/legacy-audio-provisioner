@@ -136,20 +136,6 @@ fn has_non_empty_metadata_tags(parsed: &FfprobeOutput) -> bool {
 
 /// R-19: Deteccion estricta de DRM (Apple FairPlay, WMA Protected, etc.).
 pub fn detect_drm(path_str: &str) -> Result<bool> {
-    // R-35: Validar que el filename es seguro antes de pasarlo a ffprobe
-    validate_shell_safe_filename(
-        Path::new(path_str)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(path_str),
-    )
-    .with_context(|| {
-        format!(
-            "Filename contains shell injection characters (R-35): {}",
-            path_str
-        )
-    })?;
-
     // 1. Deteccion rapida por extension (Fail-Fast)
     if path_str.to_lowercase().ends_with(".m4p") {
         return Ok(true);
@@ -184,20 +170,6 @@ pub fn detect_drm(path_str: &str) -> Result<bool> {
 /// Extrae la metadata técnica del archivo utilizando ffprobe.
 pub fn analyze_audio(input: &Path) -> Result<AudioProfile> {
     let path_str = input.to_string_lossy();
-
-    // R-35: Validar que el filename es seguro antes de pasarlo a ffprobe
-    validate_shell_safe_filename(
-        input
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&path_str),
-    )
-    .with_context(|| {
-        format!(
-            "Filename contains shell injection characters (R-35): {}",
-            path_str
-        )
-    })?;
 
     let output = Command::new("ffprobe")
         .args([
@@ -264,17 +236,10 @@ pub fn classify_audio_processing(input: &Path) -> Result<ProcessingDecision> {
 /// Normaliza físicamente el archivo de audio.
 /// Debe invocarse solo cuando la decisión NO es `FastInPlaceRename`.
 pub fn normalize_audio(input: &Path, output: &Path, decision: ProcessingDecision) -> Result<()> {
-    // R-35: Validar que los filenames son seguros antes de pasarlos a ffmpeg
-    // (aunque Command::new() no usa shell, es buena práctica validar fuentes externas)
-    let input_filename = input.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    // R-35 debe aplicarse al nombre mutado/saneado que controlamos como destino.
+    // El path fuente se pasa a ffprobe/ffmpeg como argv directo, sin shell intermedio.
     let output_filename = output.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-    validate_shell_safe_filename(input_filename).with_context(|| {
-        format!(
-            "Input filename contains shell injection characters (R-35): {}",
-            input_filename
-        )
-    })?;
     validate_shell_safe_filename(output_filename).with_context(|| {
         format!(
             "Output filename contains shell injection characters (R-35): {}",

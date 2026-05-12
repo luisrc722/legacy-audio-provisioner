@@ -366,6 +366,22 @@ fn test_08_m4p_is_reported_as_drm_protected() {
 }
 
 #[test]
+fn test_08a_m4p_with_shell_chars_in_source_is_not_blocked_by_r35() {
+    let result = normalizer::normalize_audio(
+        Path::new("/nonexistent/yo no fue pa' mi (official).m4p"),
+        Path::new("/tmp/out.mp3"),
+        normalizer::ProcessingDecision::FfmpegTranscode,
+    );
+    let err = result.expect_err(".m4p should be rejected as DRM even when source name is noisy");
+    let typed = err.downcast_ref::<ProvisioningError>();
+
+    assert!(matches!(
+        typed,
+        Some(ProvisioningError::DrmProtected { .. })
+    ));
+}
+
+#[test]
 fn test_08b_fast_in_place_never_enters_normalize_pipeline() {
     let result = normalizer::normalize_audio(
         Path::new("/nonexistent/clean_track.mp3"),
