@@ -265,22 +265,23 @@ Después de ejecutar, tu USB se verá así:
 ```
 DISCO_USB/
 ├── VOL_01/
-│   ├── 001_Cancion_1.mp3
-│   ├── 002_Cancion_2.mp3
-│   ├── 003_Cancion_3.mp3
+│   ├── 0001_Cancion_1.mp3
+│   ├── 0002_Cancion_2.mp3
+│   ├── 0003_Cancion_3.mp3
 │   └── ... (hasta 50 archivos)
 ├── VOL_02/
-│   ├── 001_Cancion_51.mp3
-│   ├── 002_Cancion_52.mp3
+│   ├── 0051_Cancion_51.mp3
+│   ├── 0052_Cancion_52.mp3
 │   └── ... (hasta 50 archivos)
 └── VOL_03/
     └── ... (archivos restantes)
 ```
 
-**Importante**: Los números (001_, 002_, etc.) ayudan al firmware del estéreo a:
+**Importante**: Los números (0001_, 0002_, etc.) ayudan al firmware del estéreo a:
 1. Mantener el orden de reproducción
 2. Evitar problemas de punteros en memoria
 3. Facilitar la navegación secuencial en la FAT
+4. Mantener orden lexicográfico correcto después de 0999 (`0999` -> `1000`)
 
 ## Backup Automático
 
@@ -291,9 +292,9 @@ Antes de copiar cualquier archivo a la USB, el programa crea una copia local:
 ├── backups/
 │   └── usb_backup_in_place__cabina_a_sandisk_ultra_fit_4c530001230101117391_abcd_1234_9f31a0d2/
 │       ├── VOL_01/
-│       │   └── 001_Cancion_1.mp3
+│       │   └── 0001_Cancion_1.mp3
 │       └── VOL_02/
-│           └── 051_Cancion_51.mp3
+│           └── 0051_Cancion_51.mp3
 ├── checkpoints/
 ├── manifests/
 └── journals/
