@@ -8,7 +8,7 @@ Contratos formales a nivel de módulo para garantizar la seguridad del hardware 
 - **Seguridad de Destino:** El destino `--usb` debe corresponder obligatoriamente a un dispositivo de bloque físico marcado como removible por el kernel, formateado en FAT32.
 - **Perfil Legacy del Volumen:** Cuando el boot sector FAT32 sea legible, el allocation unit debe ser de 32 KB para maximizar compatibilidad con estéreos legacy con cache limitada.
 - **Single Source of Truth:** El archivo JSON del Checkpoint es la única fuente de verdad autorizada para el estado de la provisión y la recuperación ante desastres.
-- **Topología Legacy:** Ningún nombre de archivo en la USB excederá los 32 caracteres ASCII, y ningún directorio contendrá más de 50 archivos.
+- **Topología Legacy:** Ningún nombre final escrito en la USB excederá los 32 caracteres ASCII, y ningún directorio contendrá más de 50 archivos.
 
 ---
 
@@ -29,8 +29,8 @@ Contratos formales a nivel de módulo para garantizar la seguridad del hardware 
 ### `sanitizer`
 #### `sanitize_filename` + `add_sequential_prefix`
 * **Preconditions:** La cadena de entrada puede contener UTF-8 arbitrario, emojis y extensiones largas.
-* **Postconditions:** Retorna un `String` truncado matemáticamente donde la longitud total (incluyendo el prefijo numérico `001_` y la extensión `.mp3`) es $\le$ 32 bytes. Todos los caracteres son forzados a ASCII seguro.
-* **Invariants:** La extensión del archivo destino es inmutablemente `.mp3`.
+* **Postconditions:** `sanitize_filename` aplica transliteración ASCII, limpieza de ruido al inicio/final por Regex compiladas con `OnceLock`, y normalización de separadores a `_` con stem intermedio $\le$ 64 caracteres.
+* **Invariants:** El nombre final escrito en USB se limita a 32 caracteres por `add_sequential_prefix`/naming compacto; la extensión de salida final del pipeline de provision es `.mp3`.
 
 ### `normalizer` (NUEVO)
 #### `normalize_audio(source_path, dest_path)`
@@ -66,6 +66,11 @@ Contratos formales a nivel de módulo para garantizar la seguridad del hardware 
 * **Preconditions:** El pipeline ETL y la verificación QA concluyeron con éxito.
 * **Postconditions:** El dispositivo se desmonta y el puerto USB se apaga lógicamente.
 * **Invariants:** Es obligatorio invocar la syscall `sync` para vaciar el *Page Cache* del kernel hacia la memoria flash antes del comando `umount`.
+
+#### Política operativa de expulsión
+* **Preconditions:** Si `LAP_SAFE_EJECT=1`, se invoca `safe_eject` al final del flujo.
+* **Postconditions:** Por defecto (sin `LAP_SAFE_EJECT`), el dispositivo permanece montado para visibilidad y verificación del usuario.
+* **Invariants:** La expulsión segura es *opt-in* desde orquestación, no obligatoria por defecto.
 
 ---
 

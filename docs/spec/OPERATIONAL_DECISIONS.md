@@ -68,10 +68,27 @@ Gobernanza documental activa: ver `docs/adr/0006-docs-as-code-governance.md`.
 
 ## AD-06: Sanitización determinista con preservación de extensión
 
-- **Decisión**: sanitizar a ASCII y limitar a 32 caracteres garantizando extensión final (`.mp3`) y prefijo secuencial.
+- **Decisión**:
+  - aplicar transliteración ASCII,
+  - limpiar ruido inicial/final por Regex compiladas con `OnceLock` (incluyendo `AUDIOMOVIL` case-insensitive en bordes),
+  - normalizar separadores a `_`,
+  - limitar stem intermedio a 64 caracteres,
+  - y garantizar nombre final legacy `<= 32` en USB con prefijo secuencial/extensión final.
 - **Justificación**:
   - evita archivos ilegibles por firmware,
   - elimina el bug de truncamiento que rompía la extensión.
+
+---
+
+## AD-10: Expulsión segura opt-in al final de provisión
+
+- **Decisión**:
+  - mantener la USB montada por defecto al finalizar (`provision` y `in-place-rebuild`),
+  - habilitar expulsión segura automática solo cuando `LAP_SAFE_EJECT=1`.
+- **Justificación**:
+  - mejora verificabilidad y visibilidad para el usuario al terminar,
+  - evita confusión operativa por desmontaje/power-off inmediato,
+  - conserva opción de seguridad estricta cuando se requiere extracción inmediata.
 
 ---
 

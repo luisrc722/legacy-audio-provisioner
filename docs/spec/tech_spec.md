@@ -16,13 +16,19 @@ Los firmwares legacy fallan ante:
 - Allocation unit objetivo para firmware legacy: 32 KB cuando pueda verificarse desde el boot sector FAT32.
 - Directorios: maximo 2 niveles (`ROOT -> VOL_XX -> archivo`).
 - Archivos por volumen: maximo 50.
-- Nombre final: <= 32 caracteres ASCII.
+- Nombre final en USB: <= 32 caracteres ASCII.
+- Sanitizacion intermedia (stem): <= 64 caracteres ASCII normalizados.
 - Escritura secuencial y sincronizacion de directorio para minimizar riesgo FAT inconsistente.
 
 ## Requisitos Funcionales
 ### R-03 Sanitizacion
-- Eliminar caracteres no permitidos, incluyendo signos de operacion y simbolos no alfanumericos similares.
-- Mantener extension de archivo.
+- Transliteration ASCII (ej. `Ñ -> N`, `á -> a`) antes del filtrado.
+- Limpieza de ruido inicial/final con Regex compiladas por `OnceLock`:
+	- simbolos/espacios al inicio,
+	- indices numericos iniciales seguidos de separadores,
+	- tags publicitarios al borde (inicio/fin) como `AUDIOMOVIL` (case-insensitive).
+- Normalizacion de separadores a `_` y colapso de duplicados.
+- Mantener extension de audio en minusculas cuando exista.
 - Prefijo secuencial (`001_`, `002_`, ...).
 - Forzar `<= 32` caracteres en el nombre final.
 
@@ -109,7 +115,8 @@ Los firmwares legacy fallan ante:
 ### R-T5 Verificacion final + expulsado seguro
 - Auditoria de topologia en USB (VOL_XX, 50 maximo, ASCII, 32 chars).
 - Verificacion SHA256 contra checkpoint para entradas `Completed`.
-- En Linux: `sync` antes de `umount` y `udisksctl power-off`.
+- En Linux: `sync` antes de `umount` y `udisksctl power-off` cuando la expulsion segura esta habilitada.
+- Politica por defecto de orquestacion: mantener USB montada al finalizar; expulsado seguro habilitable con `LAP_SAFE_EJECT=1`.
 
 ### Contrato de errores e IPC
 - Errores de dominio en `ProvisioningError` (`ENOSPC_ERROR`, `HARDWARE_FRAUD_DETECTED`, etc.).

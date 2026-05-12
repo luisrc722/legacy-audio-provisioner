@@ -97,6 +97,17 @@ cargo run -p lap-bin-provision -- \
   --verbose
 ```
 
+Nota de montaje al finalizar:
+- Por defecto la USB queda montada al terminar `provision`.
+- Si quieres expulsión automática segura al final, ejecuta con `LAP_SAFE_EJECT=1`.
+
+```bash
+LAP_SAFE_EJECT=1 cargo run -p lap-bin-provision -- \
+  provision \
+  --usb /media/usuario/DISCO_USB \
+  --source ~/MiMusica
+```
+
 ## Ejemplos Avanzados
 
 ### Caso 1: USB muy grande (> 64 GB)
@@ -401,11 +412,12 @@ Si el preflight no puede leer metadata de un archivo que debe respaldarse, la op
 |-----------|--------|
 | Profundidad de directorios | 2 niveles |
 | Archivos por carpeta | 50 máximo |
-| Longitud de nombre | 32 caracteres |
+| Longitud de nombre final en USB | 32 caracteres |
+| Longitud de stem durante sanitización | 64 caracteres |
 | Tamaño de clúster FAT32 | 32 KB |
 | Particiones soportadas | Solo MBR |
 | Encoding de nombres | ASCII/ISO-8859-1 |
-| Regex de limpieza | `[^a-zA-Z0-9\.\-\_]` |
+| Sanitización | Transliteration ASCII + Regex de ruido inicial/final + normalización a `_` |
 | Regex compilado vía | `std::sync::OnceLock` |
 | Protección de extensión | Matemática (stem truncado, ext preservada) |
 
@@ -454,11 +466,14 @@ drwxr-xr-x  7 user user  4096 Mar  6 14:29 ..
 drwxr-xr-x  2 user user  4096 Mar  6 14:30 VOL_01
 drwxr-xr-x  2 user user  4096 Mar  6 14:30 VOL_02
 
-# 7. Ejectar USB de forma segura
-$ eject /dev/sdb1
+# 7. (Opcional) Expulsar USB de forma segura
+$ LAP_SAFE_EJECT=1 cargo run -p lap-bin-provision -- \
+  provision \
+    --usb /media/user/DISK \
+    --source ~/Music
 
-# 8. O simplemente:
-$ sudo umount /dev/sdb1
+# 8. O manualmente:
+$ eject /dev/sdb1
 ```
 
 **¡Listo!** Tu USB está lista para el estéreo antiguo.

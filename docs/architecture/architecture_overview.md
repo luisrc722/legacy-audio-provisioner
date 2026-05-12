@@ -70,7 +70,8 @@ Validar HW -> Descubrir -> Backup -> Sanitizar/Planificar -> Normalizar+Copia ->
 
 - Verifica topologia (`VOL_XX`, maximo 50 archivos, nombres validos).
 - Verifica integridad contra hashes del checkpoint.
-- En Linux ejecuta `sync`, `umount` y `udisksctl power-off`.
+- En Linux puede ejecutar `sync`, `umount` y `udisksctl power-off` mediante `safe_eject`.
+- Politica de orquestacion actual: la USB queda montada por defecto al finalizar; `safe_eject` se activa cuando `LAP_SAFE_EJECT=1`.
 
 ## Mapa de Modulos
 
