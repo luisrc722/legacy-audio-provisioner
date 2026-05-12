@@ -254,7 +254,7 @@ stateDiagram-v2
   "processed_files": {
     "0": {
       "original_path": "/home/user/Music/song1.mp3",
-      "normalized_name": "001_song1.mp3",
+            "normalized_name": "0001_song1.mp3",
       "status": "Completed",
       "original_checksum": "abc123...",
       "usb_checksum": "abc123...",
@@ -329,7 +329,7 @@ fn test_checkpoint_progress() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut manager = CheckpointManager::new(temp_dir.path().to_path_buf(), ..., 2)?;
 
-    manager.record_file_start(0, PathBuf::from("a.mp3"), "001_a.mp3".into(), "hash".into())?;
+    manager.record_file_start(0, PathBuf::from("a.mp3"), "0001_a.mp3".into(), "hash".into())?;
     manager.mark_file_completed(0, "usbhash".into())?;
 
     assert_eq!(manager.get_data().progress_percentage(), 50.0);
@@ -349,7 +349,7 @@ fn test_03_real_checkpoint_tracking() -> anyhow::Result<()> {
         PathBuf::from("/fake/source"),
         2,
     )?;
-    manager.record_file_start(0, PathBuf::from("a.mp3"), "001_a.mp3".into(), "hash".into())?;
+    manager.record_file_start(0, PathBuf::from("a.mp3"), "0001_a.mp3".into(), "hash".into())?;
     manager.mark_file_completed(0, "usbhash".into())?;
 
     assert_eq!(manager.get_data().progress_percentage(), 50.0);
