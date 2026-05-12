@@ -136,7 +136,7 @@ for file in checkpoint.incomplete_files {
 
 * **Latencia de Transcodificación:** Un archivo FLAC de 10MB tarda ~2-5 segundos en transcodificarse a MP3. Para colecciones de 1000+ archivos, el tiempo total de provision escala a 30-60 minutos. Los usuarios acostumbrados a herramientas de copia rápida pueden percibir esto como lento.
 
-* **Ausencia de Metadatos en Destino:** Las réplicas provisionadas en la USB carecen intencionalmente de etiquetas ID3 y carátulas. La navegación en el estéreo dependerá puramente de la indexación secuencial (001_...) y nombres sanitizados.
+* **Ausencia de Metadatos en Destino:** Las réplicas provisionadas en la USB carecen intencionalmente de etiquetas ID3 y carátulas. La navegación en el estéreo dependerá puramente de la indexación secuencial (0001_...) y nombres sanitizados.
 
 * **Mayor Costo de CPU:** Recodificación obligatoria vs. copia directa, aunque es costo necesario para garantía de compatibilidad.
 
