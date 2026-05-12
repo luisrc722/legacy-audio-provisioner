@@ -29,8 +29,12 @@ Los firmwares legacy fallan ante:
 	- tags publicitarios al borde (inicio/fin) como `AUDIOMOVIL` (case-insensitive).
 - Normalizacion de separadores a `_` y colapso de duplicados.
 - Mantener extension de audio en minusculas cuando exista.
-- Prefijo secuencial (`001_`, `002_`, ...).
+- Prefijo secuencial de 4 digitos (`0001_`, `0002_`, ...).
 - Forzar `<= 32` caracteres en el nombre final.
+
+Transicion operativa de prefijos:
+- Lectura compatible de prefijos legacy de 3 o 4 digitos durante escaneo.
+- Escritura nueva siempre en 4 digitos (`{:04}`) para garantizar orden lexicografico estable al superar 999 archivos.
 
 ### R-04 Validacion de hardware
 - Detectar dispositivos montados desde `/proc/mounts`.
@@ -62,6 +66,9 @@ Los firmwares legacy fallan ante:
 - El calculo SHA256 se centraliza en `lap-core::crypto::compute_file_sha256` para evitar duplicacion.
 - El host opera como fuente de verdad mediante estado en `~/.lap` (checkpoints/manifests/journals por device key).
 - Continuidad de indices globales: nuevos archivos empiezan en `N+1` sin colisiones.
+- Orden determinista de nuevos: natural sort previo a asignacion de indices para evitar drift por orden binario.
+- Source-of-truth incremental: si el hash corto (`hash8`) del nombre ya existe en USB, el archivo se marca `SKIP` sin reasignar indice.
+- Deteccion de transicion 3/4 digitos con recomendacion de normalizacion completa cuando hay mezcla.
 - Relleno del ultimo volumen parcial antes de abrir nuevo `VOL_XX`.
 
 ### R-33 Base i18n runtime (minima)
