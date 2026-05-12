@@ -75,7 +75,7 @@ fn audio_extension_re() -> &'static Regex {
 fn legacy_hashed_name_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"^\d+_[a-z0-9_]+_[0-9a-fA-F]{8}\.mp3$")
+        Regex::new(r"^\d{3,4}_[a-z0-9_]+_[0-9a-fA-F]{8}\.mp3$")
             .expect("valid legacy hashed-name regex")
     })
 }
@@ -83,7 +83,7 @@ fn legacy_hashed_name_re() -> &'static Regex {
 fn legacy_hashed_stem_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"^\d+_[a-z0-9_]+_[0-9a-fA-F]{8}$")
+        Regex::new(r"^\d{3,4}_[a-z0-9_]+_[0-9a-fA-F]{8}$")
             .expect("valid legacy hashed-stem regex")
     })
 }
@@ -213,10 +213,10 @@ pub fn sanitize_filename(input: &str) -> String {
 /// use lap_core::sanitizer::add_sequential_prefix;
 ///
 /// let indexed = add_sequential_prefix("song.mp3", 1);
-/// assert_eq!(indexed, "001_song.mp3");
+/// assert_eq!(indexed, "0001_song.mp3");
 /// ```
 pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
-    let prefix = format!("{:03}_", index);
+    let prefix = format!("{:04}_", index);
     let max_len = 32;
 
     let path = std::path::Path::new(filename);
@@ -253,8 +253,8 @@ pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
 
 /// Construye un nombre legacy compacto y determinista orientado a hardware con poca cache.
 ///
-/// Formato: `NNN_<stem_truncado>_<hash8>.mp3`
-/// - `NNN_`: indice secuencial (compatibilidad de orden)
+/// Formato: `NNNN_<stem_truncado>_<hash8>.mp3`
+/// - `NNNN_`: indice secuencial (compatibilidad de orden)
 /// - `<stem_truncado>`: nombre sanitizado y truncado por presupuesto de bytes
 /// - `<hash8>`: primeros 8 hex del SHA256 de contenido (unicidad)
 ///
@@ -265,7 +265,7 @@ pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &
         return format!("{}.mp3", original_stem);
     }
 
-    let prefix = format!("{:03}_", index);
+    let prefix = format!("{:04}_", index);
     let hash8 = hash8_from_sha256_hex(sha256_hex);
     let suffix = format!("_{}.mp3", hash8);
 
@@ -362,34 +362,34 @@ mod tests {
 
     #[test]
     fn test_sequential_prefix_protects_extension() {
-        // Nombre de 40 chars + .mp3. Debería truncar el nombre pero mantener 001_ y .mp3
+        // Nombre de 40 chars + .mp3. Debería truncar el nombre pero mantener 0001_ y .mp3
         let long_name = format!("{}.mp3", "a".repeat(40));
         let result = add_sequential_prefix(&long_name, 1);
 
         assert_eq!(result.len(), 32);
-        assert!(result.starts_with("001_"));
+        assert!(result.starts_with("0001_"));
         assert!(result.ends_with(".mp3"));
-        // 001_ (4) + a repetida 24 veces (24) + .mp3 (4) = 32
-        assert_eq!(result, format!("001_{}.mp3", "a".repeat(24)));
+        // 0001_ (5) + a repetida 23 veces (23) + .mp3 (4) = 32
+        assert_eq!(result, format!("0001_{}.mp3", "a".repeat(23)));
     }
 
     #[test]
     fn test_no_extension() {
         let result = add_sequential_prefix("archivo_sin_extension_muy_largo_de_verdad", 999);
         assert_eq!(result.len(), 32);
-        assert_eq!(result, "999_archivo_sin_extension_muy_la");
+        assert_eq!(result, "0999_archivo_sin_extension_muy_l");
     }
 
     #[test]
     fn test_basic_prefix() {
         let result = add_sequential_prefix("mysong.mp3", 1);
-        assert_eq!(result, "001_mysong.mp3");
+        assert_eq!(result, "0001_mysong.mp3");
     }
 
     #[test]
     fn test_three_digit_prefix() {
         let result = add_sequential_prefix("track.flac", 999);
-        assert_eq!(result, "999_track.flac");
+        assert_eq!(result, "0999_track.flac");
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod tests {
 
         assert_eq!(result.len(), 32);
         assert!(result.ends_with(".mp3"), "La extensión debe estar presente");
-        assert!(result.starts_with("005_"), "El prefijo debe estar presente");
+        assert!(result.starts_with("0005_"), "El prefijo debe estar presente");
     }
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
         );
 
         assert_eq!(result.len(), 32);
-        assert!(result.starts_with("007_"));
+        assert!(result.starts_with("0007_"));
         assert!(result.ends_with("_01234567.mp3"));
     }
 
@@ -421,7 +421,7 @@ mod tests {
     fn test_hashed_legacy_name_fallback_hash_when_invalid() {
         let result = build_hashed_legacy_name("track", 3, "not-a-valid-sha");
 
-        assert_eq!(result, "003_track___________00000000.mp3");
+        assert_eq!(result, "0003_track__________00000000.mp3");
         assert_eq!(result.len(), 32);
     }
 
@@ -433,7 +433,7 @@ mod tests {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         );
 
-        assert!(result.starts_with("004_cancion"), "resultado inesperado: {}", result);
+        assert!(result.starts_with("0004_cancion"), "resultado inesperado: {}", result);
         assert!(result.ends_with("_01234567.mp3"));
         assert_eq!(result.len(), 32);
     }
@@ -447,7 +447,7 @@ mod tests {
         );
 
         assert_eq!(result.len(), 32);
-        assert!(result.starts_with("008_x"));
+        assert!(result.starts_with("0008_x"));
         assert!(result.ends_with("_abcdefab.mp3"));
     }
 
@@ -455,6 +455,9 @@ mod tests {
     fn test_sanitize_is_idempotent_for_legacy_hashed_name() {
         let input = "048_mi_cancion_____deadbeef.mp3";
         assert_eq!(sanitize_filename(input), input);
+
+        let input4 = "1048_mi_cancion____deadbeef.mp3";
+        assert_eq!(sanitize_filename(input4), input4);
     }
 
     #[test]
@@ -466,6 +469,14 @@ mod tests {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         );
         assert_eq!(result, "183_mi_cancion_____deadbeef.mp3");
+
+        let input_stem4 = "1183_mi_cancion____deadbeef";
+        let result4 = build_hashed_legacy_name(
+            input_stem4,
+            999,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        assert_eq!(result4, "1183_mi_cancion____deadbeef.mp3");
     }
 
     #[test]
