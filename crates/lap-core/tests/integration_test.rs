@@ -279,15 +279,19 @@ fn test_05_sync_diff_ignores_existing_hashes() -> anyhow::Result<()> {
 
     let existing_src = source.path().join("rola1.mp3");
     let new_src = source.path().join("nueva.mp3");
-    let usb_existing = usb.path().join("VOL_01/001_rola1.mp3");
 
     fs::write(&existing_src, b"same-bytes")?;
     fs::write(&new_src, b"new-bytes")?;
+
+    let existing_hash = sha256_of_file(&existing_src)?;
+    let hash8: String = existing_hash.chars().take(8).collect();
+    let usb_name = format!("001_rola1__________{}.mp3", hash8);
+    let usb_existing = usb.path().join("VOL_01").join(&usb_name);
     fs::write(&usb_existing, b"same-bytes")?;
 
     let source_files = audio_discovery::discover_audio_files(source.path())?.audio_files;
     let mut known_names = HashSet::new();
-    known_names.insert("001_rola1.mp3".to_string());
+    known_names.insert(usb_name);
 
     let report = diffing::calculate_sync_diff(&source_files, usb.path(), &known_names)?;
 
