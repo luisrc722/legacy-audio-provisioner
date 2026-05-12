@@ -9,6 +9,7 @@
 use crate::audio_discovery::{discover_audio_files, visit_audio_files, AudioFile};
 use crate::backup::BackupMetadata;
 use crate::crypto::compute_file_sha256;
+use crate::index_manager::IndexManager;
 use crate::security::validate_path_containment;
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -506,13 +507,8 @@ fn finish_sync_diff(
     }
 
     let mut files_to_process = files_to_process;
-    files_to_process.sort_by(|a, b| {
-        let a_name = a.filename.to_ascii_lowercase();
-        let b_name = b.filename.to_ascii_lowercase();
-        a_name
-            .cmp(&b_name)
-            .then_with(|| a.path.to_string_lossy().cmp(&b.path.to_string_lossy()))
-    });
+    // Estado de verdad de orden: natural sort previo a asignacion de indices.
+    IndexManager::sort_new_files_natural(&mut files_to_process);
 
     Ok(SyncDiffReport {
         files_to_process,
