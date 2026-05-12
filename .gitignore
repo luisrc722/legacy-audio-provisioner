@@ -19,3 +19,4 @@ backups/
 coverage/
 .env
 .env.local
+tmp/
