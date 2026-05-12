@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use lap_core::crypto::compute_file_sha256;
 use lap_core::error::ProvisioningError;
+use lap_core::index_manager::IndexManager;
 use lap_core::ipc::IpcEvent;
 use lap_core::security::validate_path_containment;
 use lap_core::{
@@ -917,6 +918,15 @@ impl ProvisioningOrchestrator {
                     "Step 2.1: Incremental sync mode enabled (USB hash diff)...",
                 ));
 
+            if let Ok(prefix_report) = IndexManager::detect_prefix_width_transition(usb_mount) {
+                if prefix_report.is_mixed_transition() {
+                    self.reporter.info(tr(
+                        "[TRANSICION] Se detectaron prefijos mixtos de 3 y 4 digitos en la USB. Recomendacion: ejecutar reindexacion/normalizacion completa a 4 digitos para evitar saltos de orden en estereos legacy.",
+                        "[TRANSITION] Mixed 3-digit and 4-digit prefixes were detected on USB. Recommendation: run a full 4-digit reindex/normalization to avoid ordering jumps on legacy stereos.",
+                    ));
+                }
+            }
+
             if state_paths.checkpoint_file.exists() {
                 if let Ok(usb_checkpoint_mgr) = checkpoint::CheckpointManager::load_from_disk(&state_paths.checkpoint_file) {
                     for file_cp in usb_checkpoint_mgr.get_data().processed_files.values() {
@@ -965,7 +975,8 @@ impl ProvisioningOrchestrator {
                 diff_report
             };
 
-            next_global_index = next_global_index.max(diff_report.max_existing_index.saturating_add(1));
+            let index_manager = IndexManager::from_max_existing_index(diff_report.max_existing_index);
+            next_global_index = next_global_index.max(index_manager.peek_next_index());
             existing_volume_counts = diff_report.existing_volume_counts;
             displaced_in_target = diff_report.displaced_in_target;
 
