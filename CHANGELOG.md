@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-- Sin cambios publicados todavia.
+### Changed
+- Inversion del pipeline de proteccion de nombres: primero sanitizacion y luego validacion de seguridad, evitando falsos positivos sobre nombres sin normalizar.
+- Transicion de carga masiva a evaluacion streaming en diff incremental para reducir presion de RAM y mejorar progreso en tiempo real.
+- Sanitizacion inteligente reforzada: transliteracion ASCII, poda de junk inicial/final por regex y normalizacion de separadores a `_`.
+- Motor de sincronizacion idempotente por hash: deteccion por hash8 en nombre legacy para `SKIP` de contenido existente aunque cambie carpeta/indice.
+- Escalabilidad de indexador: escritura con prefijo de 4 digitos (`{:04}`), continuidad por high-water mark y compatibilidad de lectura 3/4 digitos en transicion.
+- Topologia de volumenes `VOL_XX` mantenida con indice global como orden canonico de reproduccion para firmware legacy.
 
 ## [0.4.0] - 2026-05-09
 
