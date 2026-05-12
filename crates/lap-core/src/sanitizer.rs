@@ -72,6 +72,22 @@ fn audio_extension_re() -> &'static Regex {
     })
 }
 
+fn legacy_hashed_name_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\d+_[a-z0-9_]+_[0-9a-fA-F]{8}\.mp3$")
+            .expect("valid legacy hashed-name regex")
+    })
+}
+
+fn legacy_hashed_stem_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\d+_[a-z0-9_]+_[0-9a-fA-F]{8}$")
+            .expect("valid legacy hashed-stem regex")
+    })
+}
+
 fn split_audio_extension(input: &str) -> (String, Option<String>) {
     if let Some((stem, ext)) = input.rsplit_once('.') {
         if !stem.is_empty() && audio_extension_re().is_match(ext) {
@@ -155,6 +171,16 @@ fn sanitize_stem(input: &str) -> String {
 /// assert_eq!(cleaned, "cancion_2024_exito.mp3");
 /// ```
 pub fn sanitize_filename(input: &str) -> String {
+    let raw_base_name = Path::new(input)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(input);
+
+    // Idempotencia: si ya cumple el contrato legacy final, no volver a sanitizar.
+    if legacy_hashed_name_re().is_match(raw_base_name) {
+        return raw_base_name.to_string();
+    }
+
     let transliterated = any_ascii(input).to_lowercase();
     let base_name = Path::new(&transliterated)
         .file_name()
@@ -234,6 +260,11 @@ pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
 ///
 /// Invariante: salida ASCII y longitud == 32 bytes.
 pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &str) -> String {
+    // Idempotencia: evita generar prefijo/hash duplicados si el stem ya es legacy.
+    if legacy_hashed_stem_re().is_match(original_stem) {
+        return format!("{}.mp3", original_stem);
+    }
+
     let prefix = format!("{:03}_", index);
     let hash8 = hash8_from_sha256_hex(sha256_hex);
     let suffix = format!("_{}.mp3", hash8);
@@ -418,6 +449,23 @@ mod tests {
         assert_eq!(result.len(), 32);
         assert!(result.starts_with("008_x"));
         assert!(result.ends_with("_abcdefab.mp3"));
+    }
+
+    #[test]
+    fn test_sanitize_is_idempotent_for_legacy_hashed_name() {
+        let input = "048_mi_cancion_____deadbeef.mp3";
+        assert_eq!(sanitize_filename(input), input);
+    }
+
+    #[test]
+    fn test_build_hashed_legacy_name_is_idempotent_for_legacy_stem() {
+        let input_stem = "183_mi_cancion_____deadbeef";
+        let result = build_hashed_legacy_name(
+            input_stem,
+            999,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        assert_eq!(result, "183_mi_cancion_____deadbeef.mp3");
     }
 
     #[test]
