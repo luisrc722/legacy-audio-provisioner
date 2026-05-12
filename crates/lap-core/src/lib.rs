@@ -8,6 +8,7 @@ pub mod error;
 pub mod hardware;
 pub mod ingestion;
 pub mod in_place_transformer;
+pub mod index_manager;
 pub mod ipc;
 pub mod journal;
 pub mod manifest;
