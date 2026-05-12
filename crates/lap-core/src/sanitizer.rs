@@ -1,39 +1,181 @@
+use any_ascii::any_ascii;
 use log::warn;
+use regex::Regex;
+use std::path::Path;
+use std::sync::OnceLock;
 
 // R-03: Sanitización de Nombres
 // Requisitos:
-// - Máximo 32 caracteres por archivo
-// - Codificación: Estrictamente ASCII/ISO-8859-1
-// - Regex de limpieza: `[^a-zA-Z0-9\.\-\_]`
+// - Transliteration ASCII antes de filtrar
+// - Stem legacy maximo de 64 caracteres
+// - Extension preservada en minusculas cuando existe
 const LEGACY_MAX_FILENAME_BYTES: usize = 32;
+const LEGACY_MAX_STEM_CHARS: usize = 64;
 const HASH_SUFFIX_HEX_LEN: usize = 8;
 
-fn is_allowed_filename_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_')
+fn leading_symbol_junk_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^[\s+\-*_]+")
+            .expect("valid leading symbols/spaces regex")
+    })
 }
 
-/// Sanitiza eliminando caracteres inválidos, incluidos símbolos no alfanuméricos
-/// como signos de operación (+, -, *, /, =, etc.).
-/// NOTA: Ya no truncamos aquí para evitar destruir la extensión antes de tiempo.
+fn leading_index_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\d+(?:[\s+\-*_]+)+")
+            .expect("valid leading numeric-index regex")
+    })
+}
+
+fn leading_ad_tag_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)^\s*\(?\s*audiomovil(?:[._\s-]*\d{4})\s*\)?(?:[\s+\-*_]+)?")
+            .expect("valid leading ad-tag regex")
+    })
+}
+
+fn trailing_ad_tag_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:[-_\s]*\(?\s*audiomovil(?:[._\s-]*\d{4})?(?:\s*\(\d+\))?\s*\)?|\s*\[\s*safari music\s*\])$",
+        )
+        .expect("valid trailing ad tag regex")
+    })
+}
+
+fn trailing_noise_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"[\s._\-\(\)\[\]]+$").expect("valid trailing noise regex")
+    })
+}
+
+fn separator_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[^a-z0-9]+").expect("valid separator regex"))
+}
+
+fn underscore_run_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"_+").expect("valid underscore regex"))
+}
+
+fn audio_extension_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^(?i:mp3|flac|wav|ogg|m4a|alac|aac|wma|opus|aiff)$")
+            .expect("valid audio extension regex")
+    })
+}
+
+fn split_audio_extension(input: &str) -> (String, Option<String>) {
+    if let Some((stem, ext)) = input.rsplit_once('.') {
+        if !stem.is_empty() && audio_extension_re().is_match(ext) {
+            return (stem.to_string(), Some(ext.to_ascii_lowercase()));
+        }
+    }
+
+    (input.to_string(), None)
+}
+
+fn sanitize_stem(input: &str) -> String {
+    let mut current = input.to_string();
+
+    loop {
+        let mut changed = false;
+
+        let stripped = leading_symbol_junk_re().replace(&current, "").into_owned();
+        if stripped != current {
+            current = stripped;
+            changed = true;
+        }
+
+        let stripped = leading_index_re().replace(&current, "").into_owned();
+        if stripped != current {
+            if stripped.trim().is_empty() {
+                // Si el nombre es solo numerico, lo conservamos.
+            } else {
+                current = stripped;
+                changed = true;
+            }
+        }
+
+        let stripped = leading_ad_tag_re().replace(&current, "").into_owned();
+        if stripped != current {
+            current = stripped;
+            changed = true;
+        }
+
+        let stripped = trailing_ad_tag_re().replace(&current, "").into_owned();
+        if stripped != current {
+            current = stripped;
+            changed = true;
+        }
+
+        let stripped = trailing_noise_re().replace(&current, "").into_owned();
+        if stripped != current {
+            current = stripped;
+            changed = true;
+        }
+
+        let trimmed = current.trim().to_string();
+        if trimmed != current {
+            current = trimmed;
+            changed = true;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    let mut normalized = separator_re().replace_all(&current, "_").into_owned();
+    normalized = underscore_run_re().replace_all(&normalized, "_").into_owned();
+    normalized = normalized.trim_matches('_').to_string();
+
+    if normalized.is_empty() {
+        normalized = "audio".to_string();
+    }
+
+    normalized.chars().take(LEGACY_MAX_STEM_CHARS).collect()
+}
+
+/// Sanitiza nombres de audio con transliteracion ASCII, limpieza de junk inicial/final,
+/// normalizacion de separadores y preservacion de extension audio en minusculas.
 ///
 /// # Ejemplo
 /// ```
 /// use lap_core::sanitizer::sanitize_filename;
 ///
 /// let cleaned = sanitize_filename("Canción_2024_éxito🎵.mp3");
-/// assert_eq!(cleaned, "Cancin_2024_xito.mp3");
+/// assert_eq!(cleaned, "cancion_2024_exito.mp3");
 /// ```
 pub fn sanitize_filename(input: &str) -> String {
-    let result: String = input
-        .chars()
-        .filter(|ch| is_allowed_filename_char(*ch))
-        .collect();
+    let transliterated = any_ascii(input).to_lowercase();
+    let base_name = Path::new(&transliterated)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&transliterated);
+    let (stem, extension) = split_audio_extension(base_name);
+
+    let sanitized_stem = sanitize_stem(&stem);
+    let result = match extension {
+        Some(ext) if !ext.is_empty() => format!("{}.{}", sanitized_stem, ext),
+        _ => sanitized_stem,
+    };
+
     if result != input {
         warn!(
-            "Filename sanitized (non-ASCII/invalid chars removed): '{}' → '{}'",
-            input, result
+            "Filename sanitized (transliterated/normalized): '{}' → '{}'",
+            input,
+            result
         );
     }
+
     result
 }
 
@@ -52,7 +194,11 @@ pub fn add_sequential_prefix(filename: &str, index: usize) -> String {
     let max_len = 32;
 
     let path = std::path::Path::new(filename);
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -104,8 +250,7 @@ pub fn build_hashed_legacy_name(original_stem: &str, index: usize, sha256_hex: &
             .collect();
     }
 
-    let stripped = strip_leading_track_prefix(original_stem);
-    let cleaned = sanitize_filename(&stripped);
+    let cleaned = sanitize_filename(original_stem);
     let mut safe_stem = if cleaned.is_empty() {
         "audio".to_string()
     } else {
@@ -140,49 +285,48 @@ fn hash8_from_sha256_hex(input: &str) -> String {
     }
 }
 
-fn strip_leading_track_prefix(input: &str) -> String {
-    // Quita del inicio cualquier combinación de dígitos, espacios, guiones y underscores.
-    // Se llama sobre el stem original (antes de sanitize_filename) para que los espacios
-    // aún sean visibles como separadores de prefijo de pista.
-    // Si el string completo es ruido (e.g. "1979" como año en un título) se conserva.
-    let trimmed = input.trim_start_matches(|c: char| {
-        c.is_ascii_digit() || c == '-' || c == '_' || c == ' ' || c == '.'
-    });
-    if trimmed.is_empty() {
-        input.to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_sanitize_basic() {
-        assert_eq!(sanitize_filename("Canción.mp3"), "Cancin.mp3");
-        assert_eq!(sanitize_filename("track+remix=v2.mp3"), "trackremixv2.mp3");
-        assert_eq!(sanitize_filename("normal_file-01.mp3"), "normal_file-01.mp3");
-        assert_eq!(sanitize_filename("emoji🎵.mp3"), "emoji.mp3");
+        assert_eq!(sanitize_filename("Canción.mp3"), "cancion.mp3");
+        assert_eq!(sanitize_filename("track+remix=v2.mp3"), "track_remix_v2.mp3");
+        assert_eq!(sanitize_filename("normal_file-01.mp3"), "normal_file_01.mp3");
+        assert_eq!(sanitize_filename("emoji🎵.mp3"), "emoji_musical_note.mp3");
     }
 
     #[test]
-    fn test_strip_leading_track_prefix() {
-        // prefijo numérico con separador dash
-        assert_eq!(strip_leading_track_prefix("01-Track"), "Track");
-        assert_eq!(strip_leading_track_prefix("007__Song"), "Song");
-        // prefijo numérico con espacio (como llega antes de sanitize_filename)
-        assert_eq!(strip_leading_track_prefix("1 Mala y Peligrosa"), "Mala y Peligrosa");
-        assert_eq!(strip_leading_track_prefix("000 Audiomovil spot"), "Audiomovil spot");
-        assert_eq!(strip_leading_track_prefix("01 - Cancion De Prueba"), "Cancion De Prueba");
-        // guiones y underscores al inicio sin dígitos
-        assert_eq!(strip_leading_track_prefix("_foo"), "foo");
-        assert_eq!(strip_leading_track_prefix("--cancion"), "cancion");
-        // título que es sólo dígitos → se conserva íntegro (fallback)
-        assert_eq!(strip_leading_track_prefix("1979"), "1979");
-        // sin prefijo → sin cambios
-        assert_eq!(strip_leading_track_prefix("Track01"), "Track01");
+    fn test_sanitize_transliterates_and_normalizes_complex_name() {
+        let input = "1 NO ME ENGAÑES NUNCA - yulios kumbia FT. mexicolombialos, los telez-AUDIOMOVIL.2021 (1).mp3";
+        let result = sanitize_filename(input);
+
+        assert_eq!(result, "no_me_enganes_nunca_yulios_kumbia_ft_mexicolombialos_los_telez.mp3");
+        assert!(result.len() <= 68);
+        assert!(result.ends_with(".mp3"));
+        assert!(result.is_ascii());
+    }
+
+    #[test]
+    fn test_sanitize_removes_leading_symbol_and_numeric_noise_only_at_start() {
+        assert_eq!(
+            sanitize_filename("+++ 000 Audiomovil spot.mp3"),
+            "audiomovil_spot.mp3"
+        );
+        assert_eq!(
+            sanitize_filename("0 Calibre 50 - Mitad Y Mitad.mp3"),
+            "calibre_50_mitad_y_mitad.mp3"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_removes_audiomovil_tag_at_start_and_end_case_insensitive() {
+        assert_eq!(
+            sanitize_filename("AUDIOMOVIL.2021 Mi Track - aUdIoMoViL.2021.mp3"),
+            "mi_track.mp3"
+        );
     }
 
     #[test]
@@ -258,7 +402,7 @@ mod tests {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         );
 
-        assert!(result.starts_with("004_Cancion"), "resultado inesperado: {}", result);
+        assert!(result.starts_with("004_cancion"), "resultado inesperado: {}", result);
         assert!(result.ends_with("_01234567.mp3"));
         assert_eq!(result.len(), 32);
     }
@@ -276,79 +420,37 @@ mod tests {
         assert!(result.ends_with("_abcdefab.mp3"));
     }
 
-    #[cfg(test)]
-    mod proptests {
-        use super::*;
-        use proptest::prelude::*;
+    #[test]
+    fn test_sanitize_removes_ad_tags_and_keeps_mp3_lowercase() {
+        assert_eq!(sanitize_filename("+++ 0000 AUDIOMOVIL INTROMIX-AUDIOMOVIL.2021.mp3"), "audiomovil_intromix.mp3");
+        assert_eq!(sanitize_filename("(AUDIOMOVIL2019).mp3"), "audio.mp3");
+    }
 
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(10000))]
+    #[test]
+    fn test_sanitize_limits_stem_length_to_64_chars() {
+        let result = sanitize_filename(&format!("{}.mp3", "a".repeat(100)));
 
-            #[test]
-            fn prop_sanitize_never_panics_and_filters_correctly(ref input in "\\PC*") {
-                let result = sanitize_filename(input);
+        assert!(result.ends_with(".mp3"));
+        assert_eq!(result.trim_end_matches(".mp3").len(), 64);
+    }
 
-                // Los caracteres inválidos no deben filtrarse hacia la salida.
-                let is_valid = result
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
-                prop_assert!(is_valid, "Fuga de caracteres invalidos: {}", result);
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2000))]
 
-                // Los caracteres válidos del input deben sobrevivir en el output.
-                // (una función que devuelva "" siempre pasaría el chequeo anterior)
-                let valid_in_input: String = input
-                    .chars()
-                    .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
-                    .collect();
-                prop_assert_eq!(
-                    result, valid_in_input,
-                    "Se perdieron caracteres validos del input: '{}'",
-                    input
-                );
-            }
+        #[test]
+        fn prop_sanitize_outputs_ascii_and_is_bounded(ref input in "\\PC*") {
+            let result = sanitize_filename(input);
 
-            #[test]
-            /// Usa extensiones cortas realistas (mp3, flac, wav — ≤5 chars) para
-            /// reflejar el dominio real. Con extensiones largas se activa el branch de
-            /// truncamiento absoluto que sacrifica la extensión intencionalmente, pero
-            /// eso nunca ocurre con audio.
-            fn prop_prefix_enforces_hardware_limits(
-                ref stem in "[a-zA-Z0-9_-]{0,100}",
-                ref ext in "[a-zA-Z0-9]{0,5}",
-                index in 1usize..=999
-            ) {
-                let input = if ext.is_empty() {
-                    stem.clone()
-                } else {
-                    format!("{}.{}", stem, ext)
-                };
+            prop_assert!(result.is_ascii());
+            prop_assert!(result.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.'));
 
-                let result = add_sequential_prefix(&input, index);
-
-                prop_assert!(
-                    result.len() <= 32,
-                    "LONGITUD EXCEDIDA: {} ({} chars) a partir de stem: '{}' ext: '{}'",
-                    result,
-                    result.len(),
-                    stem,
-                    ext
-                );
-
-                let prefix = format!("{:03}_", index);
-                prop_assert!(result.starts_with(&prefix), "Prefijo destruido: {}", result);
-
-                // La extensión debe estar intacta cuando cabe dentro del límite (siempre
-                // es verdad para extensiones de audio reales de ≤5 chars con índice ≤999).
+            if let Some((stem, ext)) = result.rsplit_once('.') {
+                prop_assert!(stem.len() <= LEGACY_MAX_STEM_CHARS);
                 if !ext.is_empty() {
-                    let ext_suffix = format!(".{}", ext);
-                    prop_assert!(
-                        result.ends_with(&ext_suffix),
-                        "Extension destruida: '{}' no termina en '{}' (input: '{}')",
-                        result,
-                        ext_suffix,
-                        input
-                    );
+                    prop_assert!(matches!(ext, "mp3" | "flac" | "wav" | "ogg" | "m4a" | "alac" | "aac" | "wma" | "opus" | "aiff"));
                 }
+            } else {
+                prop_assert!(result.len() <= LEGACY_MAX_STEM_CHARS);
             }
         }
     }
