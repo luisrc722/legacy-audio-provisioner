@@ -351,6 +351,32 @@ fn is_legacy_compliant_target(path: &Path, file_name: &str) -> bool {
         && has_legacy_safe_name(file_name)
 }
 
+fn parse_legacy_hash8_from_name(file_name: &str) -> Option<String> {
+    let lower = file_name.to_ascii_lowercase();
+    if !lower.ends_with(".mp3") {
+        return None;
+    }
+
+    let stem = lower.strip_suffix(".mp3")?;
+    let (_, hash8) = stem.rsplit_once('_')?;
+    if hash8.len() != 8 || !hash8.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    Some(hash8.to_string())
+}
+
+#[cfg(test)]
+fn source_hash8(path: &Path) -> Result<String> {
+    let full = compute_file_sha256(path)?;
+    Ok(full
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .map(|c| c.to_ascii_lowercase())
+        .take(8)
+        .collect())
+}
+
 fn build_target_hash_index(
     target_mount: &Path,
 ) -> Result<(TargetHashSet, DisplacedHashMap, TargetAudioFiles)> {
@@ -359,10 +385,12 @@ fn build_target_hash_index(
     let mut non_compliant_hash_to_path: HashMap<String, PathBuf> = HashMap::new();
 
     for file in &target_report.audio_files {
-        let hash = compute_file_sha256(&file.path)?;
         if is_legacy_compliant_target(&file.path, &file.filename) {
-            compliant_hashes.insert(hash);
+            if let Some(hash8) = parse_legacy_hash8_from_name(&file.filename) {
+                compliant_hashes.insert(hash8);
+            }
         } else {
+            let hash = compute_file_sha256(&file.path)?;
             non_compliant_hash_to_path
                 .entry(hash)
                 .or_insert_with(|| file.path.clone());
@@ -401,7 +429,21 @@ impl SourceDiffAcc {
         displaced_map: &DisplacedHashMap,
     ) -> Result<()> {
         let src_hash = compute_file_sha256(&source.path)?;
-        if target_hashes.contains(&src_hash) {
+        let src_hash8: String = src_hash
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .map(|c| c.to_ascii_lowercase())
+            .take(8)
+            .collect();
+
+        if src_hash8.len() != 8 {
+            return Err(anyhow::anyhow!(
+                "Invalid SHA256 for source file '{}': cannot derive hash8",
+                source.path.display()
+            ));
+        }
+
+        if target_hashes.contains(&src_hash8) {
             self.skipped_existing += 1;
         } else if let Some(usb_path) = displaced_map.get(&src_hash) {
             let usb_path = usb_path.clone();
@@ -463,6 +505,15 @@ fn finish_sync_diff(
         }
     }
 
+    let mut files_to_process = files_to_process;
+    files_to_process.sort_by(|a, b| {
+        let a_name = a.filename.to_ascii_lowercase();
+        let b_name = b.filename.to_ascii_lowercase();
+        a_name
+            .cmp(&b_name)
+            .then_with(|| a.path.to_string_lossy().cmp(&b.path.to_string_lossy()))
+    });
+
     Ok(SyncDiffReport {
         files_to_process,
         skipped_existing,
@@ -520,6 +571,22 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn legacy_name(index: usize, stem: &str, hash8: &str) -> String {
+        let mut safe_stem: String = stem
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        safe_stem = safe_stem.chars().take(15).collect();
+        if safe_stem.is_empty() {
+            safe_stem = "audio".to_string();
+        }
+        while safe_stem.len() < 15 {
+            safe_stem.push('_');
+        }
+        format!("{:03}_{}_{}.mp3", index, safe_stem, hash8)
+    }
+
     #[test]
     fn test_calculate_sync_diff_skips_existing_by_hash() -> Result<()> {
         let source = TempDir::new()?;
@@ -529,10 +596,14 @@ mod tests {
 
         let src_existing = source.path().join("song_a.mp3");
         let src_new = source.path().join("song_b.mp3");
-        let usb_existing = usb.path().join("VOL_01/001_song_a.mp3");
-
         fs::write(&src_existing, b"same content")?;
         fs::write(&src_new, b"new content")?;
+
+        let existing_hash = source_hash8(&src_existing)?;
+        let usb_existing = usb
+            .path()
+            .join("VOL_01")
+            .join(legacy_name(183, "song_a", &existing_hash));
         fs::write(&usb_existing, b"same content")?;
 
         let source_files = discover_audio_files(source.path())?.audio_files;
@@ -541,7 +612,7 @@ mod tests {
         assert_eq!(report.skipped_existing, 1);
         assert_eq!(report.files_to_process.len(), 1);
         assert!(report.files_to_process[0].path.ends_with("song_b.mp3"));
-        assert_eq!(report.max_existing_index, 1);
+        assert_eq!(report.max_existing_index, 183);
 
         Ok(())
     }
@@ -557,7 +628,13 @@ mod tests {
         let src_new = source.path().join("new.mp3");
         fs::write(&src_existing, b"same content")?;
         fs::write(&src_new, b"new content")?;
-        fs::write(usb.path().join("VOL_01/001_existing.mp3"), b"same content")?;
+        let hash = source_hash8(&src_existing)?;
+        fs::write(
+            usb.path()
+                .join("VOL_01")
+                .join(legacy_name(40, "existing", &hash)),
+            b"same content",
+        )?;
 
         let known_names = HashSet::new();
         let eager_source = discover_audio_files(source.path())?.audio_files;
@@ -641,8 +718,16 @@ mod tests {
         fs::write(&src_a, b"same-a")?;
         fs::write(&src_b, b"same-b")?;
 
-        fs::write(usb.path().join("VOL_01/001_a.mp3"), b"same-a")?;
-        fs::write(usb.path().join("VOL_01/002_b.mp3"), b"same-b")?;
+        let hash_a = source_hash8(&src_a)?;
+        let hash_b = source_hash8(&src_b)?;
+        fs::write(
+            usb.path().join("VOL_01").join(legacy_name(1, "a", &hash_a)),
+            b"same-a",
+        )?;
+        fs::write(
+            usb.path().join("VOL_01").join(legacy_name(2, "b", &hash_b)),
+            b"same-b",
+        )?;
 
         let source_files = discover_audio_files(source.path())?.audio_files;
         let report = calculate_sync_diff(&source_files, usb.path(), &HashSet::new())?;
@@ -652,6 +737,31 @@ mod tests {
         assert_eq!(report.max_existing_index, 2);
         assert!(report.untracked_in_target.is_empty());
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_calculate_sync_diff_sorts_new_files_alphabetically() -> Result<()> {
+        let source = TempDir::new()?;
+        let usb = TempDir::new()?;
+
+        let src_z = source.path().join("zeta.mp3");
+        let src_a = source.path().join("alfa.mp3");
+        let src_m = source.path().join("medio.mp3");
+
+        fs::write(&src_z, b"z")?;
+        fs::write(&src_a, b"a")?;
+        fs::write(&src_m, b"m")?;
+
+        let source_files = discover_audio_files(source.path())?.audio_files;
+        let report = calculate_sync_diff(&source_files, usb.path(), &HashSet::new())?;
+
+        let ordered: Vec<String> = report
+            .files_to_process
+            .iter()
+            .map(|f| f.filename.clone())
+            .collect();
+        assert_eq!(ordered, vec!["alfa.mp3", "medio.mp3", "zeta.mp3"]);
         Ok(())
     }
 
@@ -671,7 +781,13 @@ mod tests {
         fs::write(&src_displaced, b"content-displaced")?;
         fs::write(&src_new, b"content-new")?;
 
-        fs::write(usb.path().join("VOL_01/007_existing.mp3"), b"content-existing")?;
+        let existing_hash = source_hash8(&src_existing)?;
+        fs::write(
+            usb.path()
+                .join("VOL_01")
+                .join(legacy_name(7, "existing", &existing_hash)),
+            b"content-existing",
+        )?;
         fs::write(
             usb.path().join("misc/displaced_original.mp3"),
             b"content-displaced",
