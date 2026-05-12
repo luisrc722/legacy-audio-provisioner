@@ -123,7 +123,7 @@ PROV_PID=$!
 
 # Sondear el disco para matar el proceso apenas escriba el primer archivo
 for i in $(seq 1 30); do
-  if ls /tmp/legacy_usb/VOL_01/*.mp3 2>/dev/null | grep -q "001_"; then
+   if ls /tmp/legacy_usb/VOL_01/*.mp3 2>/dev/null | grep -q "0001_"; then
     kill -9 $PROV_PID
     break
   fi
